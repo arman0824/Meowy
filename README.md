@@ -1,7 +1,5 @@
 # Meowl for macOS
 
-A small native menu-bar app that recreates the Meowl pet from `armansingh.me`.
-
 ## Build and run
 
 From this directory:
