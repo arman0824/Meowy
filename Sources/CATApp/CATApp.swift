@@ -2,6 +2,7 @@ import AppKit
 
 private let stateKey = "meowl-cat"
 private let scaleKey = "meowl-cat-scale"
+private let modeKey = "meowl-cat-mode"
 private let baseCatSize: CGFloat = 32
 
 private final class CatPanel: NSPanel {
@@ -17,8 +18,10 @@ final class MeowlController: NSObject {
     private let spriteView: SpriteView
     private var simulation: CatSimulation
     private var catScale: CGFloat
+    private(set) var mode: CatMode
     private var timer: Timer?
     private var screens: [CGRect] = []
+    private var dockBounds = CGRect.zero
     private var isSuspended = false
     private(set) var isRunning = false
     var scale: CGFloat { catScale }
@@ -28,9 +31,14 @@ final class MeowlController: NSObject {
         self.defaults = defaults
         let storedScale = defaults.object(forKey: scaleKey) as? Double ?? 1
         self.catScale = min(max(CGFloat(storedScale), 0.5), 2.5)
+        self.mode = defaults.string(forKey: modeKey)
+            .flatMap(CatMode.init(rawValue:)) ?? .cursor
         let saved = defaults.data(forKey: stateKey)
             .flatMap { try? JSONDecoder().decode(CatState.self, from: $0) }
         simulation = CatSimulation(state: saved ?? CatState())
+        if mode == .dock {
+            simulation.enterDockMode()
+        }
 
         let catSize = baseCatSize * catScale
         panel = CatPanel(contentRect: CGRect(x: 0, y: 0, width: catSize, height: catSize),
@@ -54,15 +62,10 @@ final class MeowlController: NSObject {
         panel.contentView = spriteView
 
         updateScreens()
-        let center = simulation.state.position
-        if !center.x.isFinite || !center.y.isFinite {
+        if !simulation.state.position.x.isFinite || !simulation.state.position.y.isFinite {
             simulation.state = CatState()
         }
-        simulation.state.position = DesktopGeometry.constrain(
-            simulation.state.position,
-            screens: screens,
-            inset: baseCatSize * catScale / 2,
-        )
+        constrainPosition()
         drawCat()
 
         NotificationCenter.default.addObserver(self, selector: #selector(updateScreens),
@@ -92,11 +95,8 @@ final class MeowlController: NSObject {
     func setScale(_ scale: CGFloat) {
         catScale = min(max(scale, 0.5), 2.5)
         defaults.set(Double(catScale), forKey: scaleKey)
-        simulation.state.position = DesktopGeometry.constrain(
-            simulation.state.position,
-            screens: screens,
-            inset: baseCatSize * catScale / 2,
-        )
+        updateDockBounds()
+        constrainPosition()
 
         let catSize = baseCatSize * catScale
         spriteView.frame = CGRect(x: 0, y: 0, width: catSize, height: catSize)
@@ -108,6 +108,20 @@ final class MeowlController: NSObject {
             display: true,
         )
         drawCat()
+    }
+
+    func setMode(_ mode: CatMode) {
+        guard self.mode != mode else { return }
+        self.mode = mode
+        defaults.set(mode.rawValue, forKey: modeKey)
+        if mode == .dock {
+            simulation.enterDockMode()
+        } else {
+            simulation.enterCursorMode()
+        }
+        constrainPosition()
+        drawCat()
+        saveState()
     }
 
     func shutDown() {
@@ -138,11 +152,15 @@ final class MeowlController: NSObject {
     }
 
     @objc private func tick() {
-        simulation.step(
-            toward: NSEvent.mouseLocation,
-            screens: screens,
-            inset: baseCatSize * catScale / 2,
-        )
+        if mode == .dock {
+            simulation.stepOnDock(in: dockBounds)
+        } else {
+            simulation.step(
+                toward: NSEvent.mouseLocation,
+                screens: screens,
+                inset: baseCatSize * catScale / 2,
+            )
+        }
         drawCat()
     }
 
@@ -153,14 +171,49 @@ final class MeowlController: NSObject {
                                      y: state.position.y - baseCatSize * catScale / 2))
     }
 
+    private func constrainPosition() {
+        guard !screens.isEmpty else { return }
+        if mode == .dock {
+            simulation.state.position = DesktopGeometry.constrainToDock(
+                simulation.state.position,
+                dock: dockBounds,
+            )
+        } else {
+            simulation.state.position = DesktopGeometry.constrain(
+                simulation.state.position,
+                screens: screens,
+                inset: baseCatSize * catScale / 2,
+            )
+        }
+    }
+
+    private func updateDockBounds() {
+        guard let screen = NSScreen.screens.first(where: {
+            $0.visibleFrame.minY > $0.frame.minY + 1
+        }) ?? NSScreen.main ?? NSScreen.screens.first else {
+            dockBounds = .zero
+            return
+        }
+
+        let halfSize = baseCatSize * catScale / 2
+        let minX = screen.frame.minX + halfSize
+        let maxX = screen.frame.maxX - halfSize
+        dockBounds = CGRect(
+            x: minX,
+            y: screen.visibleFrame.minY + halfSize,
+            width: max(0, maxX - minX),
+            height: 0,
+        )
+    }
+
     @objc private func updateScreens() {
         screens = NSScreen.screens.map(\.frame)
         guard !screens.isEmpty else { return }
-        simulation.state.position = DesktopGeometry.constrain(
-            simulation.state.position,
-            screens: screens,
-            inset: baseCatSize * catScale / 2,
-        )
+        if !simulation.state.position.x.isFinite || !simulation.state.position.y.isFinite {
+            simulation.state = CatState()
+        }
+        updateDockBounds()
+        constrainPosition()
         drawCat()
     }
 
@@ -226,6 +279,8 @@ private final class StatusBarController: NSObject {
     private let menu = NSMenu()
     private let startItem = NSMenuItem(title: "Start Meowl", action: #selector(startMeowl), keyEquivalent: "")
     private let stopItem = NSMenuItem(title: "Stop Meowl", action: #selector(stopMeowl), keyEquivalent: "")
+    private let cursorItem = NSMenuItem(title: "Follow Cursor", action: #selector(followCursor), keyEquivalent: "")
+    private let dockItem = NSMenuItem(title: "Live on Dock", action: #selector(liveOnDock), keyEquivalent: "")
     private let quitItem = NSMenuItem(title: "Quit Meowl", action: #selector(quit), keyEquivalent: "q")
     private lazy var sizeMenuView = CatSizeMenuView(
         target: self,
@@ -248,9 +303,15 @@ private final class StatusBarController: NSObject {
 
         startItem.target = self
         stopItem.target = self
+        cursorItem.target = self
+        dockItem.target = self
         quitItem.target = self
         menu.addItem(startItem)
         menu.addItem(stopItem)
+        menu.addItem(.separator())
+        menu.addItem(cursorItem)
+        menu.addItem(dockItem)
+        menu.addItem(.separator())
         let sizeItem = NSMenuItem()
         sizeItem.view = sizeMenuView
         menu.addItem(sizeItem)
@@ -262,6 +323,8 @@ private final class StatusBarController: NSObject {
     private func updateMenuState() {
         startItem.isEnabled = !meowl.isRunning
         stopItem.isEnabled = meowl.isRunning
+        cursorItem.state = meowl.mode == .cursor ? .on : .off
+        dockItem.state = meowl.mode == .dock ? .on : .off
     }
 
     @objc private func statusItemPressed() {
@@ -277,6 +340,16 @@ private final class StatusBarController: NSObject {
 
     @objc private func stopMeowl() {
         meowl.stop()
+        updateMenuState()
+    }
+
+    @objc private func followCursor() {
+        meowl.setMode(.cursor)
+        updateMenuState()
+    }
+
+    @objc private func liveOnDock() {
+        meowl.setMode(.dock)
         updateMenuState()
     }
 

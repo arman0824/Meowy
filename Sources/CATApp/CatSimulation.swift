@@ -30,6 +30,11 @@ enum CatAnimation: String, Codable, CaseIterable {
     }
 }
 
+enum CatMode: String, Codable {
+    case cursor
+    case dock
+}
+
 struct CatState: Codable {
     var position = CGPoint(x: 32, y: 32)
     var frameCount = 0
@@ -67,6 +72,10 @@ enum DesktopGeometry {
                                         height: screen.height - bottom - top))
     }
 
+    static func constrainToDock(_ point: CGPoint, dock: CGRect) -> CGPoint {
+        CGPoint(x: min(max(point.x, dock.minX), dock.maxX), y: dock.midY)
+    }
+
     private static func distanceSquared(_ point: CGPoint, to rect: CGRect) -> CGFloat {
         let nearest = clamped(point, to: rect)
         return pow(point.x - nearest.x, 2) + pow(point.y - nearest.y, 2)
@@ -77,6 +86,16 @@ enum DesktopGeometry {
 struct CatSimulation {
     var state: CatState
     var randomIndex: (Int) -> Int = { Int.random(in: 0..<$0) }
+    private var dockTargetX: CGFloat?
+    private let dockSpeed: CGFloat = 8
+    private var dockPauseTime = 0
+    private var dockSleepTime = 0
+    private var dockSleepCountdown = -1
+
+    init(state: CatState, randomIndex: @escaping (Int) -> Int = { Int.random(in: 0..<$0) }) {
+        self.state = state
+        self.randomIndex = randomIndex
+    }
 
     mutating func step(toward target: CGPoint, screens: [CGRect], inset: CGFloat = 16) {
         state.frameCount += 1
@@ -106,6 +125,129 @@ struct CatSimulation {
         let next = CGPoint(x: state.position.x - dx / distance * 10,
                            y: state.position.y + dy / distance * 10)
         state.position = DesktopGeometry.constrain(next, screens: screens, inset: inset)
+    }
+
+    mutating func enterDockMode() {
+        dockTargetX = nil
+        dockPauseTime = 0
+        dockSleepTime = 0
+        dockSleepCountdown = 600 + randomIndex(1200)
+        state.idleTime = 0
+        resetIdleAnimation()
+    }
+
+    mutating func enterCursorMode() {
+        dockTargetX = nil
+        dockPauseTime = 0
+        dockSleepTime = 0
+        dockSleepCountdown = -1
+        state.idleTime = 0
+        resetIdleAnimation()
+    }
+
+    mutating func stepOnDock(in dock: CGRect) {
+        guard dock.width > 0 else { return }
+
+        state.frameCount += 1
+        state.position.y = dock.midY
+
+        if dockSleepTime > 0 {
+            let frame = state.idleAnimationFrame
+            if frame < 8 {
+                show(.tired, frame: 0)
+            } else {
+                show(.sleeping, frame: frame / 4)
+            }
+            state.idleAnimationFrame += 1
+            dockSleepTime -= 1
+            if dockSleepTime == 0 {
+                resetIdleAnimation()
+                dockSleepCountdown = 600 + randomIndex(1200)
+                dockPauseTime = 100 + randomIndex(51)
+            }
+            return
+        }
+
+        if dockSleepCountdown < 0 {
+            dockSleepCountdown = 600 + randomIndex(1200)
+        } else if dockSleepCountdown == 0 {
+            dockSleepTime = 1_200 + randomIndex(601)
+            dockTargetX = nil
+            dockPauseTime = 0
+            state.idleAnimation = .sleeping
+            state.idleAnimationFrame = 0
+            show(.tired, frame: 0)
+            return
+        } else {
+            dockSleepCountdown -= 1
+        }
+
+        if let animation = state.idleAnimation {
+            let frame = state.idleAnimationFrame
+            show(animation, frame: frame)
+            if frame >= 9 {
+                resetIdleAnimation()
+                dockPauseTime = 100 + randomIndex(51)
+            } else {
+                state.idleAnimationFrame += 1
+            }
+            return
+        }
+
+        if dockPauseTime > 0 {
+            dockPauseTime -= 1
+            show(.idle, frame: 0)
+            return
+        }
+
+        if dockTargetX == nil {
+            chooseDockTarget(in: dock)
+        }
+
+        guard let targetX = dockTargetX else {
+            show(.idle, frame: 0)
+            return
+        }
+
+        let distance = targetX - state.position.x
+        if abs(distance) <= dockSpeed {
+            state.position.x = targetX
+            dockTargetX = nil
+            dockPauseTime = 100 + randomIndex(51)
+            if randomIndex(3) != 0 {
+                startDockAction(in: dock)
+            }
+            show(.idle, frame: 0)
+            return
+        }
+
+        let direction: CGFloat = distance > 0 ? 1 : -1
+        state.position.x += direction * min(abs(distance), dockSpeed)
+        show(direction > 0 ? .east : .west, frame: state.frameCount)
+    }
+
+    private mutating func chooseDockTarget(in dock: CGRect) {
+        let travel = CGFloat(56 + randomIndex(201))
+        let direction: CGFloat = randomIndex(2) == 0 ? -1 : 1
+        var target = min(max(state.position.x + direction * travel, dock.minX), dock.maxX)
+
+        if abs(target - state.position.x) < 16 {
+            target = min(max(state.position.x - direction * travel, dock.minX), dock.maxX)
+        }
+
+        dockTargetX = target
+    }
+
+    private mutating func startDockAction(in dock: CGRect) {
+        var actions: [CatAnimation] = [.scratchSelf]
+        if state.position.x <= dock.minX + 48 {
+            actions.append(.scratchWallW)
+        }
+        if state.position.x >= dock.maxX - 48 {
+            actions.append(.scratchWallE)
+        }
+        state.idleAnimation = actions[randomIndex(actions.count)]
+        state.idleAnimationFrame = 0
     }
 
     private mutating func idle(on screen: CGRect) {
