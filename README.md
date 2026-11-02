@@ -30,7 +30,7 @@ Click the cat icon in the menu bar to choose:
 
 - **Follow Cursor** — follows the mouse around your desktop.
 - **Live on Dock** — wanders along the Dock, pauses to scratch or relax, and takes occasional naps.
-- **Start Meowy** or **Stop Meowy**
+- **Start Meowy** / **Stop Meowy** — one button toggles the cat on or off.
 - **Size** — adjusts the cat from 50% to 250%.
 - **Speed** — adjusts movement from 25% to 200%.
 - **Quit Meowy**

@@ -346,8 +346,7 @@ private final class StatusBarController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     private let meowy: MeowyController
     private let menu = NSMenu()
-    private let startItem = NSMenuItem(title: "Start Meowy", action: #selector(startMeowy), keyEquivalent: "")
-    private let stopItem = NSMenuItem(title: "Stop Meowy", action: #selector(stopMeowy), keyEquivalent: "")
+    private let toggleItem = NSMenuItem(title: "Start Meowy", action: #selector(toggleMeowy), keyEquivalent: "")
     private let cursorItem = NSMenuItem(title: "Follow Cursor", action: #selector(followCursor), keyEquivalent: "")
     private let dockItem = NSMenuItem(title: "Live on Dock", action: #selector(liveOnDock), keyEquivalent: "")
     private let quitItem = NSMenuItem(title: "Quit Meowy", action: #selector(quit), keyEquivalent: "q")
@@ -375,13 +374,11 @@ private final class StatusBarController: NSObject {
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
-        startItem.target = self
-        stopItem.target = self
+        toggleItem.target = self
         cursorItem.target = self
         dockItem.target = self
         quitItem.target = self
-        menu.addItem(startItem)
-        menu.addItem(stopItem)
+        menu.addItem(toggleItem)
         menu.addItem(.separator())
         menu.addItem(cursorItem)
         menu.addItem(dockItem)
@@ -398,8 +395,7 @@ private final class StatusBarController: NSObject {
     }
 
     private func updateMenuState() {
-        startItem.isEnabled = !meowy.isRunning
-        stopItem.isEnabled = meowy.isRunning
+        toggleItem.title = meowy.isRunning ? "Stop Meowy" : "Start Meowy"
         cursorItem.state = meowy.mode == .cursor ? .on : .off
         dockItem.state = meowy.mode == .dock ? .on : .off
     }
@@ -410,13 +406,12 @@ private final class StatusBarController: NSObject {
         NSMenu.popUpContextMenu(menu, with: event, for: button)
     }
 
-    @objc private func startMeowy() {
-        meowy.start()
-        updateMenuState()
-    }
-
-    @objc private func stopMeowy() {
-        meowy.stop()
+    @objc private func toggleMeowy() {
+        if meowy.isRunning {
+            meowy.stop()
+        } else {
+            meowy.start()
+        }
         updateMenuState()
     }
 
