@@ -1,25 +1,38 @@
-# Meowl for macOS
+# Meowy for macOS
+
+Meowy is a small menu-bar app that puts a playful pixel-art cat on your Mac desktop.
+
+## Requirements
+
+- macOS 13 or later
+- Swift and the macOS Command Line Tools
+
+If Swift is not installed, run:
+
+```bash
+xcode-select --install
+```
 
 ## Build and run
 
-From this directory:
+Clone the repository, enter the project directory, and run:
 
 ```bash
 ./build.sh
-open Meowl.app
+open Meowy.app
 ```
 
-The app runs as a menu-bar-only application and uses the same pixel-art spritesheet and directional movement. Choose between two cat lives:
+The build script compiles the Swift sources, creates `Meowy.app`, bundles the cat sprites, and applies an ad-hoc local signature.
 
-- **Follow Cursor** — the cat follows the global macOS cursor anywhere across your desktop.
-- **Live on Dock** — the cat wanders in short playful trips at a steady pace, sits for 10–15 seconds to scratch or relax, takes random 2–3 minute naps, and then continues exploring like a real desktop pet.
+## Use Meowy
 
-Click or right-click the cat menu icon to open:
+Click the cat icon in the menu bar to choose:
 
-- **Start Meowl**
-- **Stop Meowl**
-- **Follow Cursor** or **Live on Dock**
-- **Cat size** slider from 0.5× to 2.5×
-- **Quit Meowl**
+- **Follow Cursor** — follows the mouse around your desktop.
+- **Live on Dock** — wanders along the Dock, pauses to scratch or relax, and takes occasional naps.
+- **Start Meowy** or **Stop Meowy**
+- **Size** — adjusts the cat from 50% to 250%.
+- **Speed** — adjusts movement from 25% to 200%.
+- **Quit Meowy**
 
-The app stores its last cat state, size, and behavior mode in `UserDefaults` under `meowl-cat`, `meowl-cat-scale`, and `meowl-cat-mode`. Reduced Motion disables the pet, and the app is intended for macOS desktop screens.
+Meowy remembers its position, size, and selected mode. Reduced Motion pauses the pet.
