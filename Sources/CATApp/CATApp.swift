@@ -1,8 +1,11 @@
 import AppKit
 
-private let stateKey = "meowl-cat"
-private let scaleKey = "meowl-cat-scale"
-private let modeKey = "meowl-cat-mode"
+private let stateKey = "meowy-cat"
+private let scaleKey = "meowy-cat-scale"
+private let modeKey = "meowy-cat-mode"
+private let speedKey = "meowy-cat-speed"
+private let minimumSpeedPercent: CGFloat = 25
+private let maximumSpeedPercent: CGFloat = 200
 private let baseCatSize: CGFloat = 32
 
 private final class CatPanel: NSPanel {
@@ -11,13 +14,14 @@ private final class CatPanel: NSPanel {
 }
 
 @MainActor
-final class MeowlController: NSObject {
+final class MeowyController: NSObject {
     private let sprites: SpriteSheet
     private let defaults: UserDefaults
     private let panel: CatPanel
     private let spriteView: SpriteView
     private var simulation: CatSimulation
     private var catScale: CGFloat
+    private var speedPercent: CGFloat
     private(set) var mode: CatMode
     private var timer: Timer?
     private var screens: [CGRect] = []
@@ -25,12 +29,15 @@ final class MeowlController: NSObject {
     private var isSuspended = false
     private(set) var isRunning = false
     var scale: CGFloat { catScale }
+    var speed: CGFloat { speedPercent }
 
     init(sprites: SpriteSheet, defaults: UserDefaults = .standard) {
         self.sprites = sprites
         self.defaults = defaults
         let storedScale = defaults.object(forKey: scaleKey) as? Double ?? 1
         self.catScale = min(max(CGFloat(storedScale), 0.5), 2.5)
+        let storedSpeed = defaults.object(forKey: speedKey) as? Double ?? 100
+        self.speedPercent = min(max(CGFloat(storedSpeed), minimumSpeedPercent), maximumSpeedPercent)
         self.mode = defaults.string(forKey: modeKey)
             .flatMap(CatMode.init(rawValue:)) ?? .cursor
         let saved = defaults.data(forKey: stateKey)
@@ -110,6 +117,11 @@ final class MeowlController: NSObject {
         drawCat()
     }
 
+    func setSpeedPercent(_ speed: CGFloat) {
+        speedPercent = min(max(speed, minimumSpeedPercent), maximumSpeedPercent)
+        defaults.set(Double(speedPercent), forKey: speedKey)
+    }
+
     func setMode(_ mode: CatMode) {
         guard self.mode != mode else { return }
         self.mode = mode
@@ -152,13 +164,15 @@ final class MeowlController: NSObject {
     }
 
     @objc private func tick() {
+        let speedMultiplier = speedPercent / 100
         if mode == .dock {
-            simulation.stepOnDock(in: dockBounds)
+            simulation.stepOnDock(in: dockBounds, speed: 8 * speedMultiplier)
         } else {
             simulation.step(
                 toward: NSEvent.mouseLocation,
                 screens: screens,
                 inset: baseCatSize * catScale / 2,
+                speed: 10 * speedMultiplier,
             )
         }
         drawCat()
@@ -238,33 +252,88 @@ final class MeowlController: NSObject {
 @MainActor
 private final class CatSizeMenuView: NSView {
     let slider: NSSlider
+    private let valueLabel: NSTextField
 
     init(target: AnyObject, action: Selector, value: Double) {
         slider = NSSlider(value: value, minValue: 0.5, maxValue: 2.5, target: target, action: action)
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 48))
+        valueLabel = NSTextField(labelWithString: "")
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 64))
 
-        let label = NSTextField(labelWithString: "Cat size")
-        label.font = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
-        label.frame = NSRect(x: 12, y: 26, width: 66, height: 16)
+        valueLabel.font = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
+        valueLabel.frame = NSRect(x: 12, y: 44, width: 216, height: 16)
+        updateValue(value)
 
-        let minimumLabel = NSTextField(labelWithString: "½×")
+        let minimumLabel = NSTextField(labelWithString: "50%")
         minimumLabel.font = NSFont.menuFont(ofSize: 10)
         minimumLabel.textColor = .secondaryLabelColor
-        minimumLabel.frame = NSRect(x: 12, y: 8, width: 24, height: 14)
+        minimumLabel.frame = NSRect(x: 12, y: 3, width: 32, height: 14)
 
-        let maximumLabel = NSTextField(labelWithString: "2.5×")
+        let maximumLabel = NSTextField(labelWithString: "250%")
         maximumLabel.font = NSFont.menuFont(ofSize: 10)
         maximumLabel.textColor = .secondaryLabelColor
         maximumLabel.alignment = .right
-        maximumLabel.frame = NSRect(x: 204, y: 8, width: 24, height: 14)
+        maximumLabel.frame = NSRect(x: 190, y: 3, width: 38, height: 14)
 
         slider.isContinuous = true
-        slider.frame = NSRect(x: 78, y: 23, width: 150, height: 20)
+        slider.frame = NSRect(x: 12, y: 22, width: 216, height: 20)
 
-        addSubview(label)
+        addSubview(valueLabel)
         addSubview(slider)
         addSubview(minimumLabel)
         addSubview(maximumLabel)
+    }
+
+    func updateValue(_ value: Double) {
+        valueLabel.stringValue = "Size: \(Int((value * 100).rounded()))%"
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+@MainActor
+private final class CatSpeedMenuView: NSView {
+    let slider: NSSlider
+    private let valueLabel: NSTextField
+
+    init(target: AnyObject, action: Selector, value: Double) {
+        slider = NSSlider(
+            value: value,
+            minValue: Double(minimumSpeedPercent),
+            maxValue: Double(maximumSpeedPercent),
+            target: target,
+            action: action,
+        )
+        valueLabel = NSTextField(labelWithString: "")
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 64))
+
+        valueLabel.font = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
+        valueLabel.frame = NSRect(x: 12, y: 44, width: 216, height: 16)
+        updateValue(value)
+
+        let minimumLabel = NSTextField(labelWithString: "25%")
+        minimumLabel.font = NSFont.menuFont(ofSize: 10)
+        minimumLabel.textColor = .secondaryLabelColor
+        minimumLabel.frame = NSRect(x: 12, y: 3, width: 32, height: 14)
+
+        let maximumLabel = NSTextField(labelWithString: "200%")
+        maximumLabel.font = NSFont.menuFont(ofSize: 10)
+        maximumLabel.textColor = .secondaryLabelColor
+        maximumLabel.alignment = .right
+        maximumLabel.frame = NSRect(x: 190, y: 3, width: 38, height: 14)
+
+        slider.isContinuous = true
+        slider.frame = NSRect(x: 12, y: 22, width: 216, height: 20)
+
+        addSubview(valueLabel)
+        addSubview(slider)
+        addSubview(minimumLabel)
+        addSubview(maximumLabel)
+    }
+
+    func updateValue(_ value: Double) {
+        valueLabel.stringValue = "Speed: \(Int(value.rounded()))%"
     }
 
     required init?(coder: NSCoder) {
@@ -275,26 +344,31 @@ private final class CatSizeMenuView: NSView {
 @MainActor
 private final class StatusBarController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-    private let meowl: MeowlController
+    private let meowy: MeowyController
     private let menu = NSMenu()
-    private let startItem = NSMenuItem(title: "Start Meowl", action: #selector(startMeowl), keyEquivalent: "")
-    private let stopItem = NSMenuItem(title: "Stop Meowl", action: #selector(stopMeowl), keyEquivalent: "")
+    private let startItem = NSMenuItem(title: "Start Meowy", action: #selector(startMeowy), keyEquivalent: "")
+    private let stopItem = NSMenuItem(title: "Stop Meowy", action: #selector(stopMeowy), keyEquivalent: "")
     private let cursorItem = NSMenuItem(title: "Follow Cursor", action: #selector(followCursor), keyEquivalent: "")
     private let dockItem = NSMenuItem(title: "Live on Dock", action: #selector(liveOnDock), keyEquivalent: "")
-    private let quitItem = NSMenuItem(title: "Quit Meowl", action: #selector(quit), keyEquivalent: "q")
+    private let quitItem = NSMenuItem(title: "Quit Meowy", action: #selector(quit), keyEquivalent: "q")
     private lazy var sizeMenuView = CatSizeMenuView(
         target: self,
         action: #selector(sizeChanged(_:)),
-        value: Double(meowl.scale),
+        value: Double(meowy.scale),
+    )
+    private lazy var speedMenuView = CatSpeedMenuView(
+        target: self,
+        action: #selector(speedChanged(_:)),
+        value: Double(meowy.speed),
     )
 
-    init(meowl: MeowlController) {
-        self.meowl = meowl
+    init(meowy: MeowyController) {
+        self.meowy = meowy
         super.init()
 
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "cat.fill", accessibilityDescription: "Meowl")
-                ?? NSImage(systemSymbolName: "pawprint.fill", accessibilityDescription: "Meowl")
+            button.image = NSImage(systemSymbolName: "cat.fill", accessibilityDescription: "Meowy")
+                ?? NSImage(systemSymbolName: "pawprint.fill", accessibilityDescription: "Meowy")
             button.image?.isTemplate = true
             button.target = self
             button.action = #selector(statusItemPressed)
@@ -315,16 +389,19 @@ private final class StatusBarController: NSObject {
         let sizeItem = NSMenuItem()
         sizeItem.view = sizeMenuView
         menu.addItem(sizeItem)
+        let speedItem = NSMenuItem()
+        speedItem.view = speedMenuView
+        menu.addItem(speedItem)
         menu.addItem(.separator())
         menu.addItem(quitItem)
         updateMenuState()
     }
 
     private func updateMenuState() {
-        startItem.isEnabled = !meowl.isRunning
-        stopItem.isEnabled = meowl.isRunning
-        cursorItem.state = meowl.mode == .cursor ? .on : .off
-        dockItem.state = meowl.mode == .dock ? .on : .off
+        startItem.isEnabled = !meowy.isRunning
+        stopItem.isEnabled = meowy.isRunning
+        cursorItem.state = meowy.mode == .cursor ? .on : .off
+        dockItem.state = meowy.mode == .dock ? .on : .off
     }
 
     @objc private func statusItemPressed() {
@@ -333,62 +410,68 @@ private final class StatusBarController: NSObject {
         NSMenu.popUpContextMenu(menu, with: event, for: button)
     }
 
-    @objc private func startMeowl() {
-        meowl.start()
+    @objc private func startMeowy() {
+        meowy.start()
         updateMenuState()
     }
 
-    @objc private func stopMeowl() {
-        meowl.stop()
+    @objc private func stopMeowy() {
+        meowy.stop()
         updateMenuState()
     }
 
     @objc private func followCursor() {
-        meowl.setMode(.cursor)
+        meowy.setMode(.cursor)
         updateMenuState()
     }
 
     @objc private func liveOnDock() {
-        meowl.setMode(.dock)
+        meowy.setMode(.dock)
         updateMenuState()
     }
 
     @objc private func sizeChanged(_ sender: NSSlider) {
-        meowl.setScale(CGFloat(sender.doubleValue))
+        meowy.setScale(CGFloat(sender.doubleValue))
+        sizeMenuView.updateValue(sender.doubleValue)
+    }
+
+    @objc private func speedChanged(_ sender: NSSlider) {
+        meowy.setSpeedPercent(CGFloat(sender.doubleValue))
+        speedMenuView.updateValue(sender.doubleValue)
     }
 
     @objc private func quit() {
-        meowl.shutDown()
+        meowy.shutDown()
         NSApplication.shared.terminate(nil)
     }
 }
 
 @MainActor
 private final class AppDelegate: NSObject, NSApplicationDelegate {
-    private var meowl: MeowlController?
+    private var meowy: MeowyController?
     private var statusBar: StatusBarController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApplication.shared.setActivationPolicy(.accessory)
 
-        guard let url = Bundle.main.url(forResource: "Meowl", withExtension: "gif"),
+        guard let url = Bundle.main.url(forResource: "Meowy", withExtension: "gif"),
               let sprites = SpriteSheet(url: url) else {
             let alert = NSAlert()
-            alert.messageText = "Meowl could not start"
-            alert.informativeText = "The bundled Meowl sprite sheet could not be loaded."
+            alert.messageText = "Meowy could not start"
+            alert.informativeText = "The bundled Meowy sprite sheet could not be loaded."
             alert.runModal()
             NSApplication.shared.terminate(nil)
             return
         }
 
-        let meowl = MeowlController(sprites: sprites)
-        self.meowl = meowl
-        self.statusBar = StatusBarController(meowl: meowl)
-        meowl.start()
+        let meowy = MeowyController(sprites: sprites)
+        self.meowy = meowy
+        self.statusBar = StatusBarController(meowy: meowy)
+        meowy.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        meowl?.shutDown()
+        meowy?.shutDown()
     }
 }
 

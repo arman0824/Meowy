@@ -87,7 +87,6 @@ struct CatSimulation {
     var state: CatState
     var randomIndex: (Int) -> Int = { Int.random(in: 0..<$0) }
     private var dockTargetX: CGFloat?
-    private let dockSpeed: CGFloat = 8
     private var dockPauseTime = 0
     private var dockSleepTime = 0
     private var dockSleepCountdown = -1
@@ -97,7 +96,8 @@ struct CatSimulation {
         self.randomIndex = randomIndex
     }
 
-    mutating func step(toward target: CGPoint, screens: [CGRect], inset: CGFloat = 16) {
+    mutating func step(toward target: CGPoint, screens: [CGRect], inset: CGFloat = 16,
+                      speed: CGFloat = 10) {
         state.frameCount += 1
         let dx = state.position.x - target.x
         let dy = target.y - state.position.y
@@ -122,8 +122,9 @@ struct CatSimulation {
         if dx / distance < -0.5 { direction += "E" }
         show(CatAnimation(rawValue: direction) ?? .idle, frame: state.frameCount)
 
-        let next = CGPoint(x: state.position.x - dx / distance * 10,
-                           y: state.position.y + dy / distance * 10)
+        let movement = max(0, speed)
+        let next = CGPoint(x: state.position.x - dx / distance * movement,
+                           y: state.position.y + dy / distance * movement)
         state.position = DesktopGeometry.constrain(next, screens: screens, inset: inset)
     }
 
@@ -145,7 +146,7 @@ struct CatSimulation {
         resetIdleAnimation()
     }
 
-    mutating func stepOnDock(in dock: CGRect) {
+    mutating func stepOnDock(in dock: CGRect, speed: CGFloat = 8) {
         guard dock.width > 0 else { return }
 
         state.frameCount += 1
@@ -209,8 +210,9 @@ struct CatSimulation {
             return
         }
 
+        let movement = max(0, speed)
         let distance = targetX - state.position.x
-        if abs(distance) <= dockSpeed {
+        if abs(distance) <= movement {
             state.position.x = targetX
             dockTargetX = nil
             dockPauseTime = 100 + randomIndex(51)
@@ -222,7 +224,7 @@ struct CatSimulation {
         }
 
         let direction: CGFloat = distance > 0 ? 1 : -1
-        state.position.x += direction * min(abs(distance), dockSpeed)
+        state.position.x += direction * min(abs(distance), movement)
         show(direction > 0 ? .east : .west, frame: state.frameCount)
     }
 
