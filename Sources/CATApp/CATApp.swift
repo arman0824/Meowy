@@ -931,24 +931,11 @@ private final class CatSizeMenuView: NSView {
         valueLabel.frame = NSRect(x: 12, y: 44, width: 216, height: 16)
         updateValue(value)
 
-        let minimumLabel = NSTextField(labelWithString: "50%")
-        minimumLabel.font = NSFont.menuFont(ofSize: 10)
-        minimumLabel.textColor = .secondaryLabelColor
-        minimumLabel.frame = NSRect(x: 12, y: 3, width: 32, height: 14)
-
-        let maximumLabel = NSTextField(labelWithString: "250%")
-        maximumLabel.font = NSFont.menuFont(ofSize: 10)
-        maximumLabel.textColor = .secondaryLabelColor
-        maximumLabel.alignment = .right
-        maximumLabel.frame = NSRect(x: 190, y: 3, width: 38, height: 14)
-
         slider.isContinuous = true
         slider.frame = NSRect(x: 12, y: 22, width: 216, height: 20)
 
         addSubview(valueLabel)
         addSubview(slider)
-        addSubview(minimumLabel)
-        addSubview(maximumLabel)
     }
 
     func updateValue(_ value: Double) {
@@ -980,24 +967,11 @@ private final class CatSpeedMenuView: NSView {
         valueLabel.frame = NSRect(x: 12, y: 44, width: 216, height: 16)
         updateValue(value)
 
-        let minimumLabel = NSTextField(labelWithString: "25%")
-        minimumLabel.font = NSFont.menuFont(ofSize: 10)
-        minimumLabel.textColor = .secondaryLabelColor
-        minimumLabel.frame = NSRect(x: 12, y: 3, width: 32, height: 14)
-
-        let maximumLabel = NSTextField(labelWithString: "200%")
-        maximumLabel.font = NSFont.menuFont(ofSize: 10)
-        maximumLabel.textColor = .secondaryLabelColor
-        maximumLabel.alignment = .right
-        maximumLabel.frame = NSRect(x: 190, y: 3, width: 38, height: 14)
-
         slider.isContinuous = true
         slider.frame = NSRect(x: 12, y: 22, width: 216, height: 20)
 
         addSubview(valueLabel)
         addSubview(slider)
-        addSubview(minimumLabel)
-        addSubview(maximumLabel)
     }
 
     func updateValue(_ value: Double) {
