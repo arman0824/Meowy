@@ -6,6 +6,8 @@
 	<string>Meowy</string>
 	<key>CFBundleExecutable</key>
 	<string>CAT</string>
+	<key>CFBundleIconFile</key>
+	<string>Meowy</string>
 	<key>CFBundleIdentifier</key>
 	<string>me.armansingh.meowy</string>
 	<key>CFBundleInfoDictionaryVersion</key>

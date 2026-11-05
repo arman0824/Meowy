@@ -146,6 +146,16 @@ struct CatSimulation {
         resetIdleAnimation()
     }
 
+    mutating func pauseForJoke() {
+        dockTargetX = nil
+        dockPauseTime = 0
+        state.idleAnimation = nil
+        state.idleAnimationFrame = 0
+        state.idleTime = 0
+        state.displayedAnimation = .idle
+        state.displayedFrame = 0
+    }
+
     mutating func stepOnDock(in dock: CGRect, speed: CGFloat = 8) {
         guard dock.width > 0 else { return }
 

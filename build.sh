@@ -24,6 +24,7 @@ mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$EXECUTABLE" "$APP_DIR/Contents/MacOS/CAT"
 cp "$ROOT_DIR/Info.plist" "$APP_DIR/Contents/Info.plist"
 cp "$ROOT_DIR/Resources/Meowy.gif" "$APP_DIR/Contents/Resources/Meowy.gif"
+cp "$ROOT_DIR/Resources/Meowy.icns" "$APP_DIR/Contents/Resources/Meowy.icns"
 
 codesign --force --deep --sign - "$APP_DIR" >/dev/null 2>&1 || true
 
