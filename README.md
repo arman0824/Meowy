@@ -30,6 +30,7 @@ Click the cat icon in the menu bar to choose:
 - **Follow Cursor** — follows the mouse around your desktop.
 - **Live on Dock** — wanders along the Dock, pauses to scratch or relax, and takes occasional naps.
 - **Jokes** — toggles the 5-minute joke bubble while docked.
+- **Joke Source** — choose between Dark Jokes, Dad Jokes, Advice, and Quotes.
 - **Agents** — toggles terminal-agent status bubbles.
 - **Cat Name…** — rename the cat; hovering over the cat shows its name.
 - **Size** — adjusts the cat from 50% to 250%.

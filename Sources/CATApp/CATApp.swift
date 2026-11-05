@@ -1,10 +1,26 @@
 import AppKit
 
+enum JokeSource: String, CaseIterable {
+    case dark
+    case dad
+    case advice
+    case quote
+    var title: String {
+        switch self {
+        case .dark: return "Dark Jokes"
+        case .dad: return "Dad Jokes"
+        case .advice: return "Advice"
+        case .quote: return "Quotes"
+        }
+    }
+}
+
 private let stateKey = "meowy-cat"
 private let scaleKey = "meowy-cat-scale"
 private let modeKey = "meowy-cat-mode"
 private let speedKey = "meowy-cat-speed"
 private let jokesKey = "meowy-cat-jokes"
+private let jokeSourceKey = "meowy-cat-joke-source"
 private let agentsKey = "meowy-cat-agents"
 private let catNameKey = "meowy-cat-name"
 private let displayNameKey = "meowy-cat-display-name"
@@ -33,6 +49,7 @@ final class MeowyController: NSObject {
     private var isSuspended = false
     private(set) var isRunning = false
     private(set) var jokesEnabled: Bool
+    private(set) var jokeSource: JokeSource
     private(set) var agentsEnabled: Bool
     private var agentMonitorTimer: Timer?
     private var agentStackPanel: NSPanel?
@@ -70,6 +87,7 @@ final class MeowyController: NSObject {
         } else {
             self.jokesEnabled = true
         }
+        self.jokeSource = JokeSource(rawValue: defaults.string(forKey: jokeSourceKey) ?? "") ?? .dark
         if let storedAgents = defaults.object(forKey: agentsKey) as? Bool {
             self.agentsEnabled = storedAgents
         } else {
@@ -187,6 +205,11 @@ final class MeowyController: NSObject {
         saveState()
     }
 
+
+    func setJokeSource(_ source: JokeSource) {
+        jokeSource = source
+        defaults.set(source.rawValue, forKey: jokeSourceKey)
+    }
 
     func setJokesEnabled(_ enabled: Bool) {
         jokesEnabled = enabled
@@ -668,24 +691,45 @@ final class MeowyController: NSObject {
     }
 
     private func fetchJoke() {
-        guard isRunning, mode == .dock else { return }
-        let url = URL(string: "https://v2.jokeapi.dev/joke/Dark?type=single")!
-        var request = URLRequest(url: url)
+        guard isRunning, mode == .dock, jokesEnabled else { return }
+        let source = jokeSource
+        var request: URLRequest
+        switch source {
+        case .dark:
+            request = URLRequest(url: URL(string: "https://v2.jokeapi.dev/joke/Dark?type=single")!)
+        case .dad:
+            var r = URLRequest(url: URL(string: "https://icanhazdadjoke.com/")!)
+            r.setValue("application/json", forHTTPHeaderField: "Accept")
+            request = r
+        case .advice:
+            request = URLRequest(url: URL(string: "https://api.adviceslip.com/advice")!)
+        case .quote:
+            request = URLRequest(url: URL(string: "https://zenquotes.io/api/random")!)
+        }
         request.timeoutInterval = 12
         let task = URLSession.shared.dataTask(with: request) { [weak self] data, _, _ in
             var text = "Why did the cat sit on the computer?\nTo keep an eye on the mouse."
             if let data,
-               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                if let joke = json["joke"] as? String {
-                    text = joke
-                } else if let setup = json["setup"] as? String,
-                          let delivery = json["delivery"] as? String {
-                    text = setup + "\n" + delivery
+               let json = try? JSONSerialization.jsonObject(with: data) {
+                switch source {
+                case .dark:
+                    if let dict = json as? [String: Any] {
+                        if let joke = dict["joke"] as? String { text = joke }
+                        else if let setup = dict["setup"] as? String, let delivery = dict["delivery"] as? String { text = setup + "\n" + delivery }
+                    }
+                case .dad:
+                    if let dict = json as? [String: Any], let joke = dict["joke"] as? String { text = joke }
+                case .advice:
+                    if let dict = json as? [String: Any], let slip = dict["slip"] as? [String: Any], let advice = slip["advice"] as? String { text = advice }
+                case .quote:
+                    if let arr = json as? [[String: Any]], let first = arr.first,
+                       let quote = first["q"] as? String {
+                        text = quote
+                        if let author = first["a"] as? String { text += "\n— " + author }
+                    }
                 }
             }
-            DispatchQueue.main.async {
-                self?.presentJoke(text)
-            }
+            DispatchQueue.main.async { self?.presentJoke(text) }
         }
         task.resume()
     }
@@ -974,6 +1018,9 @@ private final class StatusBarController: NSObject {
     private let cursorItem = NSMenuItem(title: "Follow Cursor", action: #selector(followCursor), keyEquivalent: "")
     private let dockItem = NSMenuItem(title: "Live on Dock", action: #selector(liveOnDock), keyEquivalent: "")
     private let jokesItem = NSMenuItem(title: "Jokes", action: #selector(toggleJokes), keyEquivalent: "")
+    private let jokeSourceSubMenu = NSMenu(title: "Joke Source")
+    private let jokeSourceItem = NSMenuItem(title: "Joke Source", action: nil, keyEquivalent: "")
+    private var jokeSourceMenuItems: [NSMenuItem] = []
     private let agentsItem = NSMenuItem(title: "Agents", action: #selector(toggleAgents), keyEquivalent: "")
     private let catNameItem = NSMenuItem(title: "Cat Name…", action: #selector(setCatName), keyEquivalent: "")
     private let quitItem = NSMenuItem(title: "Quit Meowy", action: #selector(quit), keyEquivalent: "q")
@@ -1004,6 +1051,15 @@ private final class StatusBarController: NSObject {
         dockItem.target = self
         jokesItem.target = self
         agentsItem.target = self
+
+        jokeSourceItem.submenu = jokeSourceSubMenu
+        for (index, source) in JokeSource.allCases.enumerated() {
+            let item = NSMenuItem(title: source.title, action: #selector(selectJokeSource(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            jokeSourceMenuItems.append(item)
+            jokeSourceSubMenu.addItem(item)
+        }
         catNameItem.target = self
         quitItem.target = self
         menu.addItem(toggleItem)
@@ -1012,6 +1068,7 @@ private final class StatusBarController: NSObject {
         menu.addItem(dockItem)
         menu.addItem(.separator())
         menu.addItem(jokesItem)
+        menu.addItem(jokeSourceItem)
         menu.addItem(agentsItem)
         menu.addItem(.separator())
         menu.addItem(catNameItem)
@@ -1032,6 +1089,9 @@ private final class StatusBarController: NSObject {
         cursorItem.state = meowy.mode == .cursor ? .on : .off
         dockItem.state = meowy.mode == .dock ? .on : .off
         jokesItem.state = meowy.jokesEnabled ? .on : .off
+        for (index, item) in jokeSourceMenuItems.enumerated() {
+            item.state = JokeSource.allCases[index] == meowy.jokeSource ? .on : .off
+        }
         agentsItem.state = meowy.agentsEnabled ? .on : .off
     }
 
@@ -1061,6 +1121,12 @@ private final class StatusBarController: NSObject {
     }
     @objc private func toggleJokes() {
         meowy.setJokesEnabled(!meowy.jokesEnabled)
+        updateMenuState()
+    }
+    @objc private func selectJokeSource(_ sender: NSMenuItem) {
+        let sources = JokeSource.allCases
+        guard sender.tag >= 0, sender.tag < sources.count else { return }
+        meowy.setJokeSource(sources[sender.tag])
         updateMenuState()
     }
     @objc private func toggleAgents() {
