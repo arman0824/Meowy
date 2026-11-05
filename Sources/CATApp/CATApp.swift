@@ -272,11 +272,8 @@ final class MeowyController: NSObject {
                 // Completion once
                 if lastClaudeStatus == "busy" && !(claudeCompletionUntil.map { $0 > Date() } ?? false) {
                     claudeCompletionUntil = Date().addingTimeInterval(7)
-                    if let url = Bundle.main.url(forResource: "Breeze", withExtension: "wav") {
-                        NSSound(contentsOf: url, byReference: true)?.play()
-                    } else {
-                        NSSound(named: "Glass")?.play()
-                    }
+                    let url = URL(fileURLWithPath: "/System/Library/Sounds/Blow.aiff")
+                    NSSound(contentsOf: url, byReference: true)?.play()
                 }
                 if claudeCompletionUntil.map({ $0 > Date() }) ?? false {
                     statuses.append("Claude: work complete")
