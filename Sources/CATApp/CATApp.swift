@@ -925,14 +925,14 @@ private final class CatSizeMenuView: NSView {
     init(target: AnyObject, action: Selector, value: Double) {
         slider = NSSlider(value: value, minValue: 0.5, maxValue: 2.5, target: target, action: action)
         valueLabel = NSTextField(labelWithString: "")
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 48))
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 52))
 
         valueLabel.font = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
-        valueLabel.frame = NSRect(x: 12, y: 44, width: 216, height: 16)
+        valueLabel.frame = NSRect(x: 12, y: 32, width: 216, height: 16)
         updateValue(value)
 
         slider.isContinuous = true
-        slider.frame = NSRect(x: 12, y: 22, width: 216, height: 20)
+        slider.frame = NSRect(x: 12, y: 6, width: 216, height: 20)
 
         addSubview(valueLabel)
         addSubview(slider)
@@ -961,14 +961,14 @@ private final class CatSpeedMenuView: NSView {
             action: action,
         )
         valueLabel = NSTextField(labelWithString: "")
-        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 48))
+        super.init(frame: NSRect(x: 0, y: 0, width: 240, height: 52))
 
         valueLabel.font = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
-        valueLabel.frame = NSRect(x: 12, y: 44, width: 216, height: 16)
+        valueLabel.frame = NSRect(x: 12, y: 32, width: 216, height: 16)
         updateValue(value)
 
         slider.isContinuous = true
-        slider.frame = NSRect(x: 12, y: 22, width: 216, height: 20)
+        slider.frame = NSRect(x: 12, y: 6, width: 216, height: 20)
 
         addSubview(valueLabel)
         addSubview(slider)
