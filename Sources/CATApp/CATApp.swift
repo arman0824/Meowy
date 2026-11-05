@@ -995,11 +995,14 @@ private final class StatusBarController: NSObject {
     private let toggleItem = NSMenuItem(title: "Start Meowy", action: #selector(toggleMeowy), keyEquivalent: "")
     private let cursorItem = NSMenuItem(title: "Follow Cursor", action: #selector(followCursor), keyEquivalent: "")
     private let dockItem = NSMenuItem(title: "Live on Dock", action: #selector(liveOnDock), keyEquivalent: "")
-    private let jokesItem = NSMenuItem(title: "Jokes", action: #selector(toggleJokes), keyEquivalent: "")
+    private let jokesItem = NSMenuItem(title: "Jokes", action: nil, keyEquivalent: "")
+    private var jokesSubMenu = NSMenu(title: "Jokes")
+    private let jokesEnabledItem = NSMenuItem(title: "Enabled", action: #selector(toggleJokes), keyEquivalent: "")
     private let jokeSourceSubMenu = NSMenu(title: "Joke Source")
-    private let jokeSourceItem = NSMenuItem(title: "Joke Source", action: nil, keyEquivalent: "")
     private var jokeSourceMenuItems: [NSMenuItem] = []
-    private let agentsItem = NSMenuItem(title: "Agents", action: #selector(toggleAgents), keyEquivalent: "")
+    private let agentsItem = NSMenuItem(title: "Agents", action: nil, keyEquivalent: "")
+    private let agentsEnabledItem = NSMenuItem(title: "Enabled", action: #selector(toggleAgents), keyEquivalent: "")
+    private var agentsSubMenu = NSMenu(title: "Agents")
     private let catNameItem = NSMenuItem(title: "Cat Name…", action: #selector(setCatName), keyEquivalent: "")
     private let quitItem = NSMenuItem(title: "Quit Meowy", action: #selector(quit), keyEquivalent: "q")
     private lazy var sizeMenuView = CatSizeMenuView(
@@ -1027,17 +1030,28 @@ private final class StatusBarController: NSObject {
         toggleItem.target = self
         cursorItem.target = self
         dockItem.target = self
-        jokesItem.target = self
-        agentsItem.target = self
+        jokesEnabledItem.target = self
+        agentsEnabledItem.target = self
 
-        jokeSourceItem.submenu = jokeSourceSubMenu
+        jokesSubMenu = NSMenu(title: "Jokes")
+        jokesSubMenu.addItem(jokesEnabledItem)
+        jokesSubMenu.addItem(.separator())
         for (index, source) in JokeSource.allCases.enumerated() {
             let item = NSMenuItem(title: source.title, action: #selector(selectJokeSource(_:)), keyEquivalent: "")
             item.target = self
             item.tag = index
             jokeSourceMenuItems.append(item)
-            jokeSourceSubMenu.addItem(item)
+            jokesSubMenu.addItem(item)
         }
+        jokesItem.submenu = jokesSubMenu
+
+        agentsSubMenu = NSMenu(title: "Agents")
+        agentsSubMenu.addItem(agentsEnabledItem)
+        agentsSubMenu.addItem(.separator())
+        let claudeItem = NSMenuItem(title: "Claude", action: nil, keyEquivalent: "")
+        claudeItem.state = .on
+        agentsSubMenu.addItem(claudeItem)
+        agentsItem.submenu = agentsSubMenu
         catNameItem.target = self
         quitItem.target = self
         menu.addItem(toggleItem)
@@ -1046,7 +1060,6 @@ private final class StatusBarController: NSObject {
         menu.addItem(dockItem)
         menu.addItem(.separator())
         menu.addItem(jokesItem)
-        menu.addItem(jokeSourceItem)
         menu.addItem(agentsItem)
         menu.addItem(.separator())
         menu.addItem(catNameItem)
@@ -1066,11 +1079,19 @@ private final class StatusBarController: NSObject {
         toggleItem.title = meowy.isRunning ? "Stop Meowy" : "Start Meowy"
         cursorItem.state = meowy.mode == .cursor ? .on : .off
         dockItem.state = meowy.mode == .dock ? .on : .off
-        jokesItem.state = meowy.jokesEnabled ? .on : .off
+        jokesEnabledItem.state = meowy.jokesEnabled ? .on : .off
+        for (index, item) in jokeSourceMenuItems.enumerated() {
+            item.state = JokeSource.allCases[index] == meowy.jokeSource ? .on : .off
+            item.isEnabled = meowy.jokesEnabled
+        }
+        agentsEnabledItem.state = meowy.agentsEnabled ? .on : .off
+        for item in agentsSubMenu.items where item != agentsEnabledItem {
+            item.isEnabled = meowy.agentsEnabled
+        }
         for (index, item) in jokeSourceMenuItems.enumerated() {
             item.state = JokeSource.allCases[index] == meowy.jokeSource ? .on : .off
         }
-        agentsItem.state = meowy.agentsEnabled ? .on : .off
+
     }
 
     @objc private func statusItemPressed() {
