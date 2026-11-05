@@ -54,6 +54,7 @@ final class MeowyController: NSObject {
     private var agentMonitorTimer: Timer?
     private var agentStackPanel: NSPanel?
     private var agentStack: NSStackView?
+    private var agentFloatPhase: CGFloat = 0
     private var isAgentActive = false
     private var lastClaudeStatus: String?
     private var claudeCompletionUntil: Date?
@@ -536,6 +537,7 @@ final class MeowyController: NSObject {
         x = min(max(x, screen.minX + 8), screen.maxX - size.width - 8)
         var y = center.y + catSize / 2 + 8
         if y + size.height > screen.maxY - 8 { y = center.y - catSize / 2 - size.height - 8 }
+        y += sin(agentFloatPhase) * 6
         panel.setFrameOrigin(CGPoint(x: x, y: y))
     }
 
@@ -641,6 +643,7 @@ final class MeowyController: NSObject {
                 updateJokeBubblePosition()
             }
             updateNamePanel()
+            agentFloatPhase += 0.18
             updateAgentStackPosition()
             drawCat()
             return
@@ -658,6 +661,7 @@ final class MeowyController: NSObject {
         }
         updateJokeBubblePosition()
         updateNamePanel()
+        agentFloatPhase += 0.18
         updateAgentStackPosition()
         drawCat()
     }
