@@ -742,7 +742,7 @@ final class MeowyController: NSObject {
         simulation.pauseForJoke()
         showJokeBubble(text)
         jokeHideTimer?.invalidate()
-        let hideTimer = Timer(timeInterval: 20, repeats: false) { [weak self] _ in
+        let hideTimer = Timer(timeInterval: 30, repeats: false) { [weak self] _ in
             DispatchQueue.main.async { [weak self] in self?.hideJokeBubble() }
         }
         RunLoop.main.add(hideTimer, forMode: .common)
