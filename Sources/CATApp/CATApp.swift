@@ -27,7 +27,14 @@ private let displayNameKey = "meowy-cat-display-name"
 private let minimumSpeedPercent: CGFloat = 25
 private let maximumSpeedPercent: CGFloat = 200
 private let baseCatSize: CGFloat = 32
-
+private let messageFont = NSFont.systemFont(ofSize: 12, weight: .medium)
+private let messageCornerRadius: CGFloat = 12
+private let messageBorderWidth: CGFloat = 0.5
+private let messageHorizontalPadding: CGFloat = 18
+private let messageVerticalPadding: CGFloat = 12
+private let messageMaxWidth: CGFloat = 320
+private let messageMinWidth: CGFloat = 120
+private let messageTextWidth: CGFloat = messageMaxWidth - messageHorizontalPadding * 2
 private final class CatPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -58,11 +65,16 @@ final class MeowyController: NSObject {
     private var pomodoroPanel: NSPanel?
     private var pomodoroLabel: NSTextField?
     private var pomodoroEnd: Date?
+    private var pomodoroFloatPhase: CGFloat = 0
+    private var pomodoroBlinkTimer: Timer?
     private var pomodoroCompletedUntil: Date?
     private var pomodoroTimer: Timer?
     private var reminderDue: Date?
+    private var reminderTimer: Timer?
     private var reminderMessage: String = ""
     private var reminderShowingUntil: Date?
+    private var reminderDisplayText: String = "Reminder"
+    private var reminderBlinkTimer: Timer?
     private var isAgentActive = false
     private var lastClaudeStatus: String?
     private var claudeCompletionUntil: Date?
@@ -166,6 +178,10 @@ final class MeowyController: NSObject {
         jokeFetchTimer = nil
         stopAgentMonitor()
         pomodoroTimer?.invalidate()
+        reminderTimer?.invalidate()
+        reminderTimer = nil
+        reminderBlinkTimer?.invalidate()
+        reminderBlinkTimer = nil
         pomodoroTimer = nil
         isJokePaused = false
         jokePanel?.orderOut(nil)
@@ -325,13 +341,20 @@ final class MeowyController: NSObject {
             statuses.append("\(name) running")
         }
 
+        if let until = reminderShowingUntil, Date() < until {
+            if !reminderDisplayText.isEmpty && !statuses.contains(reminderDisplayText) {
+                statuses.append(reminderDisplayText)
+            }
+        } else {
+            reminderShowingUntil = nil
+        }
+
         if statuses.isEmpty {
             isAgentActive = false
             agentStackPanel?.orderOut(nil)
             agentStackPanel = nil
         } else {
             isAgentActive = true
-            hideJokeBubble()
             showAgentStack(statuses)
         }
     }
@@ -340,14 +363,16 @@ final class MeowyController: NSObject {
         let panel = ensureJokePanel()
         guard let label = jokeLabel, let container = jokeBubbleView else { return }
         label.stringValue = text
-        label.preferredMaxLayoutWidth = 280
+        label.font = messageFont
+        label.alignment = .center
+        label.preferredMaxLayoutWidth = messageTextWidth
         label.usesSingleLineMode = false
         let fit = label.fittingSize
-        let bubbleWidth = min(max(fit.width + 24, 120), 320)
-        let bubbleHeight = max(fit.height + 16, 34)
+        let bubbleWidth = min(max(fit.width + messageHorizontalPadding * 2, messageMinWidth), messageMaxWidth)
+        let bubbleHeight = max(fit.height + messageVerticalPadding * 2, 34)
         container.frame = CGRect(x: 0, y: 0, width: bubbleWidth, height: bubbleHeight)
-        label.frame = CGRect(x: 12, y: (bubbleHeight - fit.height) / 2,
-                             width: bubbleWidth - 24, height: fit.height)
+        label.frame = CGRect(x: messageHorizontalPadding, y: (bubbleHeight - fit.height) / 2,
+                             width: bubbleWidth - messageHorizontalPadding * 2, height: fit.height)
         panel.setFrame(CGRect(x: 0, y: 0, width: bubbleWidth, height: bubbleHeight), display: true)
         updateJokeBubblePosition()
         panel.orderFrontRegardless()
@@ -492,24 +517,39 @@ final class MeowyController: NSObject {
         for v in stack.arrangedSubviews { stack.removeArrangedSubview(v); v.removeFromSuperview() }
         var maxWidth: CGFloat = 120
         var totalHeight: CGFloat = 8
+        let isReminder = (reminderShowingUntil.map { $0 > Date() } ?? false)
+        if let layer = panel.contentView?.layer {
+            layer.backgroundColor = isReminder ? NSColor.systemRed.withAlphaComponent(0.94).cgColor : NSColor.windowBackgroundColor.withAlphaComponent(0.94).cgColor
+            layer.cornerRadius = messageCornerRadius
+            layer.masksToBounds = true
+            layer.borderWidth = messageBorderWidth
+            layer.borderColor = isReminder ? NSColor.systemRed.cgColor : NSColor.separatorColor.cgColor
+        }
         for text in texts {
             let label = NSTextField(wrappingLabelWithString: text)
-            label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-            if text.contains("work complete") || text.hasPrefix("Reminder:") {
-                label.textColor = .systemGreen
+            if isReminder && text == reminderDisplayText {
+                label.font = messageFont
+                label.textColor = .white
+                label.alignment = .center
             } else {
-                label.textColor = .labelColor
+                label.alignment = .center
+                label.font = messageFont
+                if text.contains("work complete") {
+                    label.textColor = .systemGreen
+                } else {
+                    label.textColor = .labelColor
+                }
+                label.alignment = .center
             }
-            label.alignment = .left
-            label.preferredMaxLayoutWidth = 280
+            label.preferredMaxLayoutWidth = messageTextWidth
             let fit = label.fittingSize
-            maxWidth = max(maxWidth, fit.width + 16)
+            maxWidth = max(maxWidth, fit.width)
             totalHeight += fit.height + 4
             label.frame.size = fit
             stack.addArrangedSubview(label)
         }
-        let bubbleWidth = min(max(maxWidth, 120), 320)
-        panel.setFrame(CGRect(x: 0, y: 0, width: bubbleWidth, height: max(totalHeight, 24)), display: true)
+        let bubbleWidth = min(max(maxWidth + messageHorizontalPadding * 2, messageMinWidth), messageMaxWidth)
+        panel.setFrame(CGRect(x: 0, y: 0, width: bubbleWidth, height: max(totalHeight + messageVerticalPadding, 24)), display: true)
         updateAgentStackPosition()
         panel.orderFrontRegardless()
     }
@@ -525,12 +565,18 @@ final class MeowyController: NSObject {
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         let stack = NSStackView()
         stack.orientation = .vertical
-        stack.alignment = .leading
+        stack.alignment = .centerX
         stack.spacing = 4
         stack.wantsLayer = true
         stack.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.94).cgColor
-        stack.layer?.cornerRadius = 10
-        stack.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 6, right: 8)
+        stack.layer?.cornerRadius = messageCornerRadius
+        stack.layer?.masksToBounds = true
+        stack.layer?.borderWidth = messageBorderWidth
+        stack.layer?.borderColor = NSColor.separatorColor.cgColor
+        stack.edgeInsets = NSEdgeInsets(top: messageVerticalPadding,
+                                      left: messageHorizontalPadding,
+                                      bottom: messageVerticalPadding,
+                                      right: messageHorizontalPadding)
         panel.contentView = stack
         agentStackPanel = panel
         agentStack = stack
@@ -601,10 +647,10 @@ final class MeowyController: NSObject {
         guard let label = nameLabel else { return }
         label.stringValue = catName
         label.sizeToFit()
-        let pad: CGFloat = 12
-        let w = label.frame.width + pad
-        let h = label.frame.height + 6
-        label.frame = NSRect(x: pad/2, y: 3, width: label.frame.width, height: label.frame.height)
+        let w = label.frame.width + messageHorizontalPadding * 2
+        let h = label.frame.height + messageVerticalPadding * 2
+        label.frame = NSRect(x: messageHorizontalPadding, y: messageVerticalPadding,
+                             width: label.frame.width, height: label.frame.height)
         panel.setFrame(NSRect(x: 0, y: 0, width: w, height: h), display: true)
         updateNamePanelPosition()
         panel.orderFrontRegardless()
@@ -625,8 +671,22 @@ final class MeowyController: NSObject {
 
     func setReminder(minutes: Double, message: String) {
         guard minutes > 0 else { return }
-        reminderDue = Date().addingTimeInterval(minutes * 60)
+        setReminder(due: Date().addingTimeInterval(minutes * 60), message: message)
+    }
+
+    func setReminder(due: Date, message: String) {
+        reminderDue = due
         reminderMessage = message.isEmpty ? "Reminder" : message
+        startReminderTimer()
+    }
+
+    private func startReminderTimer() {
+        reminderTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in self?.checkReminderDue() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        reminderTimer = timer
     }
 
     func setPomodoro(minutes: Double) {
@@ -646,14 +706,23 @@ final class MeowyController: NSObject {
         panel.ignoresMouseEvents = true
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.94).cgColor
+        container.layer?.cornerRadius = messageCornerRadius
+        container.layer?.masksToBounds = true
+        container.layer?.borderWidth = messageBorderWidth
+        container.layer?.borderColor = NSColor.separatorColor.cgColor
+
         let label = NSTextField(labelWithString: "")
-        label.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold)
+        label.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         label.textColor = .labelColor
         label.alignment = .center
-        label.wantsLayer = true
-        label.layer?.backgroundColor = NSColor.clear.cgColor
-        panel.contentView = label
+        container.addSubview(label)
+
+        panel.contentView = container
         pomodoroPanel = panel
+        // store container? We need for frame updates; use contentView.
         pomodoroLabel = label
         return panel
     }
@@ -663,22 +732,28 @@ final class MeowyController: NSObject {
         if let until = pomodoroCompletedUntil {
             if Date() >= until {
                 pomodoroCompletedUntil = nil
+                pomodoroBlinkTimer?.invalidate()
+                pomodoroBlinkTimer = nil
                 pomodoroTimer?.invalidate()
                 pomodoroTimer = nil
+                pomodoroPanel?.alphaValue = 1.0
                 pomodoroPanel?.orderOut(nil)
                 return
             }
             let panel = ensurePomodoroPanel()
-            guard let label = pomodoroLabel else { return }
-            label.textColor = .systemGreen
-            label.stringValue = "00"
+            guard let label = pomodoroLabel, let container = label.superview else { return }
+            container.layer?.backgroundColor = NSColor.systemGreen.withAlphaComponent(0.94).cgColor
+            label.textColor = .white
+            label.stringValue = "Time\'s up 00:00"
             label.sizeToFit()
-            let w = label.frame.width + 8
-            let h = label.frame.height + 4
-            label.frame = NSRect(x: 4, y: 2, width: label.frame.width, height: label.frame.height)
-            panel.setFrame(NSRect(x: 0, y: 0, width: w, height: h), display: true)
+            let w = label.frame.width
+            let h = label.frame.height
+            container.frame = CGRect(x: 0, y: 0, width: w + 36, height: h + 24)
+            label.frame = NSRect(x: 18, y: 12, width: w, height: h)
+            panel.setFrame(CGRect(x: 0, y: 0, width: w + 36, height: h + 24), display: true)
             updatePomodoroPosition()
             panel.orderFrontRegardless()
+            if pomodoroBlinkTimer == nil { startPomodoroBlinkTimer() }
             return
         }
 
@@ -697,22 +772,38 @@ final class MeowyController: NSObject {
             return
         }
         let panel = ensurePomodoroPanel()
-        guard let label = pomodoroLabel else { return }
+        guard let label = pomodoroLabel, let container = label.superview else { return }
+        container.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.94).cgColor
         label.textColor = .labelColor
         label.stringValue = formatPomodoroTime(remaining)
         label.sizeToFit()
-        let w = label.frame.width + 8
-        let h = label.frame.height + 4
-        label.frame = NSRect(x: 4, y: 2, width: label.frame.width, height: label.frame.height)
-        panel.setFrame(NSRect(x: 0, y: 0, width: w, height: h), display: true)
+        let w = label.frame.width
+        let h = label.frame.height
+        container.frame = CGRect(x: 0, y: 0, width: w + 36, height: h + 24)
+        label.frame = NSRect(x: 18, y: 12, width: w, height: h)
+        panel.setFrame(CGRect(x: 0, y: 0, width: w + 36, height: h + 24), display: true)
         updatePomodoroPosition()
         panel.orderFrontRegardless()
+    }
+
+    private func startPomodoroBlinkTimer() {
+        pomodoroBlinkTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.4, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if let until = self.pomodoroCompletedUntil, Date() >= until { return }
+                guard let panel = self.pomodoroPanel, panel.isVisible else { return }
+                panel.alphaValue = panel.alphaValue > 0.5 ? 0.25 : 1.0
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        pomodoroBlinkTimer = timer
     }
 
     private func startPomodoroTimer() {
         pomodoroTimer?.invalidate()
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
-            DispatchQueue.main.async { [weak self] in self?.updatePomodoroPanel() }
+            DispatchQueue.main.async { [weak self] in self?.pomodoroFloatPhase += 0.18; self?.updatePomodoroPanel() }
         }
         timer.tolerance = 0.05
         RunLoop.main.add(timer, forMode: .common)
@@ -726,7 +817,7 @@ final class MeowyController: NSObject {
         let s = total % 60
         if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
         if m > 0 { return String(format: "%d:%02d", m, s) }
-        return String(format: "%ds", s)
+        return String(format: "00:%02d", s)
     }
 
     private func updatePomodoroPosition() {
@@ -737,7 +828,8 @@ final class MeowyController: NSObject {
         let screen = DesktopGeometry.nearestScreen(to: center, screens: screens)
         var x = center.x - size.width / 2
         x = min(max(x, screen.minX + 4), screen.maxX - size.width - 4)
-        let y = center.y + catSize / 2 + 2
+        let floatOffset = sin(pomodoroFloatPhase) * 6
+        let y = center.y + catSize / 2 + 2 + floatOffset
         panel.setFrameOrigin(CGPoint(x: x, y: y))
     }
 
@@ -745,14 +837,33 @@ final class MeowyController: NSObject {
     private func checkReminderDue() {
         guard let due = reminderDue, Date() >= due else { return }
         reminderDue = nil
-        if !reminderMessage.isEmpty {
-            showAgentStack(["Reminder: " + reminderMessage])
-            // color green? showAgentStack currently labels default; we'll leave green via separate? For now generic.
-        }
-        // play sound
+        let message = reminderMessage.isEmpty ? "Reminder" : reminderMessage
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        reminderDisplayText = formatter.string(from: Date()) + " " + message
+        reminderShowingUntil = Date().addingTimeInterval(12)
+        showAgentStack([reminderDisplayText])
         NSSound(contentsOf: URL(fileURLWithPath: "/System/Library/Sounds/Blow.aiff"), byReference: true)?.play()
-        // green text: reuse agent stack with green? We'll mark by message prefix "Reminder" handle in showAgentStack coloring
-        reminderShowingUntil = Date().addingTimeInterval(7)
+        startReminderBlinkTimer()
+    }
+
+    private func startReminderBlinkTimer() {
+        reminderBlinkTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.4, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                if let until = self.reminderShowingUntil, Date() >= until {
+                    self.reminderBlinkTimer?.invalidate()
+                    self.reminderBlinkTimer = nil
+                    self.agentStackPanel?.alphaValue = 1.0
+                    return
+                }
+                guard let panel = self.agentStackPanel, panel.isVisible else { return }
+                panel.alphaValue = panel.alphaValue > 0.5 ? 0.25 : 1.0
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        reminderBlinkTimer = timer
     }
 
     func shutDown() {
@@ -784,15 +895,17 @@ final class MeowyController: NSObject {
 
     @objc private func tick() {
         if isJokePaused {
+            agentFloatPhase += 0.18
+            updateAgentStackPosition()
             if !isJokeBursting {
                 jokeFloatPhase += 0.18
                 updateJokeBubblePosition()
             }
             updateNamePanel()
-            agentFloatPhase += 0.18
-            updateAgentStackPosition()
             checkReminderDue()
             updatePomodoroPanel()
+            pomodoroFloatPhase += 0.18
+            updatePomodoroPosition()
             drawCat()
             return
         }
@@ -807,12 +920,14 @@ final class MeowyController: NSObject {
                 speed: 10 * speedMultiplier,
             )
         }
-        updateJokeBubblePosition()
-        updateNamePanel()
         agentFloatPhase += 0.18
         updateAgentStackPosition()
+        updateJokeBubblePosition()
+        updateNamePanel()
         checkReminderDue()
         updatePomodoroPanel()
+        pomodoroFloatPhase += 0.18
+        updatePomodoroPosition()
         drawCat()
     }
 
@@ -947,13 +1062,13 @@ final class MeowyController: NSObject {
         let container = NSView()
         container.wantsLayer = true
         container.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.94).cgColor
-        container.layer?.cornerRadius = 12
+        container.layer?.cornerRadius = messageCornerRadius
         container.layer?.masksToBounds = true
-        container.layer?.borderWidth = 0.5
+        container.layer?.borderWidth = messageBorderWidth
         container.layer?.borderColor = NSColor.separatorColor.cgColor
 
         let label = NSTextField(wrappingLabelWithString: "")
-        label.font = NSFont.systemFont(ofSize: 12, weight: .medium)
+        label.font = messageFont
         label.textColor = .labelColor
         label.alignment = .center
         label.maximumNumberOfLines = 0
@@ -971,15 +1086,15 @@ final class MeowyController: NSObject {
         let panel = ensureJokePanel()
         guard let label = jokeLabel, let container = jokeBubbleView else { return }
         label.stringValue = text
-        label.preferredMaxLayoutWidth = 280
+        label.preferredMaxLayoutWidth = messageTextWidth
         label.usesSingleLineMode = false
         let fit = label.fittingSize
 
-        let bubbleWidth = min(max(fit.width + 24, 120), 320)
-        let bubbleHeight = max(fit.height + 16, 34)
+        let bubbleWidth = min(max(fit.width + messageHorizontalPadding * 2, messageMinWidth), messageMaxWidth)
+        let bubbleHeight = max(fit.height + messageVerticalPadding * 2, 34)
         container.frame = CGRect(x: 0, y: 0, width: bubbleWidth, height: bubbleHeight)
-        label.frame = CGRect(x: 12, y: (bubbleHeight - fit.height) / 2,
-                             width: bubbleWidth - 24, height: fit.height)
+        label.frame = CGRect(x: messageHorizontalPadding, y: (bubbleHeight - fit.height) / 2,
+                             width: bubbleWidth - messageHorizontalPadding * 2, height: fit.height)
         panel.setFrame(CGRect(x: 0, y: 0, width: bubbleWidth, height: bubbleHeight), display: true)
         updateJokeBubblePosition()
         panel.orderFrontRegardless()
@@ -1004,6 +1119,12 @@ final class MeowyController: NSObject {
         }
         if originY < screen.minY + 8 {
             originY = screen.minY + 8
+        }
+        if let agentPanel = agentStackPanel, agentPanel.isVisible {
+            originY = max(originY, agentPanel.frame.maxY + 8)
+            if originY + size.height > screen.maxY - 8 {
+                originY = screen.maxY - size.height - 8
+            }
         }
         panel.setFrameOrigin(CGPoint(x: originX, y: originY))
     }
@@ -1326,22 +1447,66 @@ private final class StatusBarController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Reminder"
-        alert.informativeText = "Minutes from now and message"
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.spacing = 8
-        let minutesField = NSTextField(string: "5")
-        minutesField.placeholderString = "Minutes"
-        let messageField = NSTextField(string: "")
+        alert.informativeText = "Enter minutes from now, or pick a time."
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 120))
+        let minutesField = NSTextField(frame: NSRect(x: 0, y: 94, width: 280, height: 24))
+        minutesField.stringValue = ""
+        minutesField.placeholderString = "Minutes from now"
+        let hourPopup = NSPopUpButton(frame: NSRect(x: 0, y: 62, width: 70, height: 24), pullsDown: false)
+        hourPopup.addItems(withTitles: (1...12).map { "\($0)" })
+        hourPopup.selectItem(at: 11)
+        let minutePopup = NSPopUpButton(frame: NSRect(x: 80, y: 62, width: 70, height: 24), pullsDown: false)
+        minutePopup.addItems(withTitles: (0...59).map { String(format: "%02d", $0) })
+        minutePopup.selectItem(at: 39)
+        let ampmPopup = NSPopUpButton(frame: NSRect(x: 160, y: 62, width: 70, height: 24), pullsDown: false)
+        ampmPopup.addItems(withTitles: ["AM", "PM"])
+        ampmPopup.selectItem(at: 1)
+        let messageField = NSTextField(frame: NSRect(x: 0, y: 8, width: 280, height: 24))
+        messageField.stringValue = ""
         messageField.placeholderString = "Message"
-        stack.addArrangedSubview(minutesField)
-        stack.addArrangedSubview(messageField)
-        alert.accessoryView = stack
+        accessory.addSubview(minutesField)
+        accessory.addSubview(hourPopup)
+        accessory.addSubview(minutePopup)
+        accessory.addSubview(ampmPopup)
+        accessory.addSubview(messageField)
+        alert.accessoryView = accessory
+        let observer = NotificationCenter.default.addObserver(forName: NSControl.textDidChangeNotification, object: nil, queue: .main) { _ in
+            let minsFilled = !minutesField.stringValue.trimmingCharacters(in: .whitespaces).isEmpty
+            hourPopup.isEnabled = !minsFilled
+            minutePopup.isEnabled = !minsFilled
+            ampmPopup.isEnabled = !minsFilled
+            hourPopup.alphaValue = minsFilled ? 0.45 : 1.0
+            minutePopup.alphaValue = minsFilled ? 0.45 : 1.0
+            ampmPopup.alphaValue = minsFilled ? 0.45 : 1.0
+        }
+        minutesField.isEnabled = true
+        hourPopup.isEnabled = true
+        minutePopup.isEnabled = true
+        ampmPopup.isEnabled = true
+        minutesField.alphaValue = 1.0
+        hourPopup.alphaValue = 1.0
+        minutePopup.alphaValue = 1.0
+        ampmPopup.alphaValue = 1.0
         alert.addButton(withTitle: "Set")
         alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn {
-            let mins = Double(minutesField.stringValue) ?? 0
-            meowy.setReminder(minutes: mins, message: messageField.stringValue)
+        let modalResult = alert.runModal()
+        NotificationCenter.default.removeObserver(observer)
+        if modalResult == .alertFirstButtonReturn {
+            let minsText = minutesField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if minsText.isEmpty {
+                var hour = Int(hourPopup.titleOfSelectedItem ?? "12") ?? 12
+                if hour == 12 { hour = 0 }
+                if (ampmPopup.titleOfSelectedItem ?? "AM") == "PM" { hour += 12 }
+                let minute = Int(minutePopup.titleOfSelectedItem ?? "0") ?? 0
+                let calendar = Calendar.current
+                let now = Date()
+                var due = calendar.date(bySettingHour: hour, minute: minute, second: 0, of: now) ?? now
+                if due <= now { due = calendar.date(byAdding: .day, value: 1, to: due) ?? due }
+                meowy.setReminder(due: due, message: messageField.stringValue)
+            } else {
+                let mins = Double(minsText) ?? 0
+                meowy.setReminder(minutes: mins, message: messageField.stringValue)
+            }
         }
     }
 
@@ -1349,14 +1514,23 @@ private final class StatusBarController: NSObject {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Pomodoro"
-        alert.informativeText = "Minutes"
-        let field = NSTextField(string: "25")
-        alert.accessoryView = field
+        alert.informativeText = "Hours and minutes"
+        let accessory = NSView(frame: NSRect(x: 0, y: 0, width: 280, height: 60))
+        let hoursField = NSTextField(frame: NSRect(x: 0, y: 34, width: 130, height: 24))
+        hoursField.stringValue = "0"
+        hoursField.placeholderString = "Hours"
+        let minutesField = NSTextField(frame: NSRect(x: 150, y: 34, width: 130, height: 24))
+        minutesField.stringValue = "25"
+        minutesField.placeholderString = "Minutes"
+        accessory.addSubview(hoursField)
+        accessory.addSubview(minutesField)
+        alert.accessoryView = accessory
         alert.addButton(withTitle: "Start")
         alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn {
-            let mins = Double(field.stringValue) ?? 25
-            meowy.setPomodoro(minutes: mins)
+            let hours = Double(hoursField.stringValue) ?? 0
+            let minutes = Double(minutesField.stringValue) ?? 0
+            meowy.setPomodoro(minutes: hours * 60 + minutes)
             meowy.updatePomodoroPanel()
         }
     }
