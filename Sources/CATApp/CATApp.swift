@@ -23,6 +23,7 @@ private let speedKey = "meowy-cat-speed"
 private let jokesKey = "meowy-cat-jokes"
 private let jokeSourceKey = "meowy-cat-joke-source"
 private let agentsKey = "meowy-cat-agents"
+private let musicKey = "meowy-cat-music"
 private let catNameKey = "meowy-cat-name"
 private let displayNameKey = "meowy-cat-display-name"
 private let minimumSpeedPercent: CGFloat = 25
@@ -61,6 +62,7 @@ final class MeowyController: NSObject {
     private(set) var jokesEnabled: Bool
     private(set) var jokeSource: JokeSource
     private(set) var agentsEnabled: Bool
+    private(set) var musicEnabled: Bool
     private var agentMonitorTimer: Timer?
     private var agentStackPanel: NSPanel?
     private var agentStack: NSStackView?
@@ -121,6 +123,11 @@ final class MeowyController: NSObject {
             self.agentsEnabled = storedAgents
         } else {
             self.agentsEnabled = true
+        }
+        if let storedMusic = defaults.object(forKey: musicKey) as? Bool {
+            self.musicEnabled = storedMusic
+        } else {
+            self.musicEnabled = true
         }
         self.catName = defaults.string(forKey: catNameKey) ?? "Meowy"
         let saved = defaults.data(forKey: stateKey)
@@ -187,7 +194,7 @@ final class MeowyController: NSObject {
         updateScreens()
         updateActivity()
         if mode == .dock { startJokeSchedule() }
-        if agentsEnabled { startAgentMonitor() }
+        if agentsEnabled || musicEnabled { startAgentMonitor() }
     }
 
     func stop() {
@@ -491,6 +498,42 @@ final class MeowyController: NSObject {
         return (true, activity ?? "Thinking")
     }
 
+    private func appleScriptMusicTrack(app: String) -> String? {
+        let source = """
+        tell application "\(app)"
+            if it is running then
+                if player state is playing then
+                    set trackName to name of current track
+                    try
+                        set artistName to artist of current track
+                    on error
+                        set artistName to ""
+                    end try
+                    if artistName is "" then
+                        return trackName
+                    else
+                        return trackName & " — " & artistName
+                    end if
+                end if
+            end if
+        end tell
+        return ""
+        """
+        var error: NSDictionary?
+        guard let script = NSAppleScript(source: source) else { return nil }
+        let result = script.executeAndReturnError(&error)
+        guard error == nil else { return nil }
+        let text = result.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let text, !text.isEmpty { return text }
+        return nil
+    }
+
+    private func currentMusicTrack() -> String? {
+        if let track = appleScriptMusicTrack(app: "Music") { return track }
+        if let track = appleScriptMusicTrack(app: "Spotify") { return track }
+        return nil
+    }
+
     private func isCursorProcessRunning() -> Bool {
         isExactProcess("Cursor") || isExactProcess("cursor-agent") || isExactProcess("agent")
     }
@@ -532,9 +575,10 @@ final class MeowyController: NSObject {
 
 
     private func pollAgentStatus() {
-        guard isRunning, agentsEnabled else { return }
+        guard isRunning, agentsEnabled || musicEnabled else { return }
         var statuses: [String] = []
 
+        if agentsEnabled {
         // Claude sessions
         var claudeBusy = false
         let sessions = detectedClaudeSessions()
@@ -611,9 +655,15 @@ final class MeowyController: NSObject {
                 lastCursorStatus = nil
             }
         }
-
         // Agent message file
         if let fileText = agentMessageFile() { statuses.append(fileText) }
+        } // end agentsEnabled
+
+        // Music now playing
+        if musicEnabled, let track = currentMusicTrack() {
+            let text = "Now Playing: \(track)"
+            if !statuses.contains(text) { statuses.append(text) }
+        }
 
         // Generic fallback
         if statuses.isEmpty, let name = detectedAgentName(),
