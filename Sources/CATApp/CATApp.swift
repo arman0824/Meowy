@@ -1293,11 +1293,11 @@ private final class StatusBarController: NSObject {
     private let agentsItem = NSMenuItem(title: "Agents", action: nil, keyEquivalent: "")
     private let actionItemsItem = NSMenuItem(title: "Action Items", action: nil, keyEquivalent: "")
     private let actionItemsSubMenu = NSMenu(title: "Action Items")
-    private let reminderItem = NSMenuItem(title: "Reminder…", action: #selector(setReminder), keyEquivalent: "")
-    private let pomodoroItem = NSMenuItem(title: "Pomodoro…", action: #selector(setPomodoro), keyEquivalent: "")
+    private let reminderItem = NSMenuItem(title: "Reminder", action: #selector(setReminder), keyEquivalent: "")
+    private let pomodoroItem = NSMenuItem(title: "Pomodoro", action: #selector(setPomodoro), keyEquivalent: "")
     private let agentsEnabledItem = NSMenuItem(title: "Enabled", action: #selector(toggleAgents), keyEquivalent: "")
     private var agentsSubMenu = NSMenu(title: "Agents")
-    private let catNameItem = NSMenuItem(title: "Cat Name…", action: #selector(setCatName), keyEquivalent: "")
+    private let catNameItem = NSMenuItem(title: "Cat Name", action: #selector(setCatName), keyEquivalent: "")
     private let quitItem = NSMenuItem(title: "Quit Meowy", action: #selector(quit), keyEquivalent: "q")
     private lazy var sizeMenuView = CatSizeMenuView(
         target: self,

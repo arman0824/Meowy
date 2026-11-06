@@ -33,7 +33,7 @@ Click the cat icon in the menu bar to choose:
 - **Joke Source** — choose between Dark Jokes, Dad Jokes, Advice, and Quotes.
 - **Agents** — toggles terminal-agent status bubbles.
 - **Action Items** — set reminders and pomodoro timers that appear in floating bubbles.
-- **Cat Name…** — rename the cat; hovering over the cat shows its name.
+- **Cat Name** — rename the cat; hovering over the cat shows its name.
 - **Size** — adjusts the cat from 50% to 250%.
 - **Speed** — adjusts movement from 25% to 200%.
 - **Quit Meowy**
@@ -49,8 +49,8 @@ When **Agents** is enabled, Meowy monitors Claude Code automatically:
 Supported agent processes include Claude Code.
 
 ## Reminders and pomodoro
-- **Reminder…** — schedule a reminder by minutes from now or by a specific time of day.
-- **Pomodoro…** — start a countdown timer with hours and minutes; the cat shows remaining time and plays a sound when it finishes.
+- **Reminder** — schedule a reminder by minutes from now or by a specific time of day.
+- **Pomodoro** — start a countdown timer with hours and minutes; the cat shows remaining time and plays a sound when it finishes.
 
 All floating message bubbles (jokes, agent status, reminders, pomodoro) use consistent styling and remain visible without overlapping.
 
