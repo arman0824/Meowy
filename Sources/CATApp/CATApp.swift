@@ -66,6 +66,8 @@ final class MeowyController: NSObject {
     private var agentMonitorTimer: Timer?
     private var agentStackPanel: NSPanel?
     private var agentStack: NSStackView?
+    private var musicPanel: NSPanel?
+    private var musicLabel: NSTextField?
     private var agentFloatPhase: CGFloat = 0
     private var pomodoroPanel: NSPanel?
     private var pomodoroLabel: NSTextField?
@@ -212,6 +214,7 @@ final class MeowyController: NSObject {
         pomodoroTimer = nil
         isJokePaused = false
         jokePanel?.orderOut(nil)
+        musicPanel?.orderOut(nil)
         updateActivity()
         saveState()
     }
@@ -519,11 +522,22 @@ final class MeowyController: NSObject {
         end tell
         return ""
         """
-        var error: NSDictionary?
-        guard let script = NSAppleScript(source: source) else { return nil }
-        let result = script.executeAndReturnError(&error)
-        guard error == nil else { return nil }
-        let text = result.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        process.arguments = ["-e", source]
+        let output = Pipe()
+        let errors = Pipe()
+        process.standardOutput = output
+        process.standardError = errors
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            return nil
+        }
+        guard process.terminationStatus == 0 else { return nil }
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let text, !text.isEmpty { return text }
         return nil
     }
@@ -659,10 +673,16 @@ final class MeowyController: NSObject {
         if let fileText = agentMessageFile() { statuses.append(fileText) }
         } // end agentsEnabled
 
-        // Music now playing
-        if musicEnabled, let track = currentMusicTrack() {
-            let text = "Now Playing: \(track)"
-            if !statuses.contains(text) { statuses.append(text) }
+        // Music is shown in its own stable bubble so reminder/pomodoro blinking does not fade it.
+        if musicEnabled {
+            if let track = currentMusicTrack() {
+                let text = "Now Playing: \(track)"
+                updateMusicPanel(text: text)
+            } else {
+                musicPanel?.orderOut(nil)
+            }
+        } else {
+            musicPanel?.orderOut(nil)
         }
 
         // Generic fallback
@@ -944,6 +964,74 @@ final class MeowyController: NSObject {
         var pomodoroOffset: CGFloat = 0
         if showingAbove && pomodoroPanel?.isVisible == true { pomodoroOffset = (pomodoroPanel?.frame.height ?? 18) + 8 }
         y += sin(agentFloatPhase) * 6 + pomodoroOffset
+        panel.setFrameOrigin(CGPoint(x: x, y: y))
+    }
+
+    private func ensureMusicPanel() -> NSPanel {
+        if let panel = musicPanel { return panel }
+        let panel = CatPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 2)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        let label = NSTextField(labelWithString: "")
+        label.font = messageFont
+        label.textColor = .labelColor
+        label.alignment = .center
+        label.lineBreakMode = .byWordWrapping
+        label.preferredMaxLayoutWidth = messageTextWidth
+        label.wantsLayer = true
+        label.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.94).cgColor
+        label.layer?.cornerRadius = messageCornerRadius
+        label.layer?.masksToBounds = true
+        label.layer?.borderWidth = messageBorderWidth
+        label.layer?.borderColor = NSColor.separatorColor.cgColor
+        panel.contentView = label
+        musicPanel = panel
+        musicLabel = label
+        return panel
+    }
+
+    private func updateMusicPanel(text: String?) {
+        guard let text else {
+            musicPanel?.orderOut(nil)
+            return
+        }
+        let panel = ensureMusicPanel()
+        guard let label = musicLabel else { return }
+        label.stringValue = text
+        label.preferredMaxLayoutWidth = messageTextWidth
+        let fit = label.fittingSize
+        let width = min(max(fit.width + messageHorizontalPadding * 2, messageMinWidth), messageMaxWidth)
+        let height = max(fit.height + messageVerticalPadding * 2, 24)
+        panel.setFrame(CGRect(x: 0, y: 0, width: width, height: height), display: true)
+        label.frame = panel.contentView?.bounds ?? CGRect(x: 0, y: 0, width: width, height: height)
+        updateMusicPanelPosition()
+        panel.orderFrontRegardless()
+    }
+
+    private func updateMusicPanelPosition() {
+        guard let panel = musicPanel, panel.isVisible else { return }
+        let center = simulation.state.position
+        let catSize = baseCatSize * catScale
+        let size = panel.frame.size
+        let screen = DesktopGeometry.nearestScreen(to: center, screens: screens)
+        var x = center.x - size.width / 2
+        x = min(max(x, screen.minX + 8), screen.maxX - size.width - 8)
+        var y = center.y + catSize / 2 + 8
+        let showingAbove = y + size.height <= screen.maxY - 8
+        if !showingAbove { y = center.y - catSize / 2 - size.height - 8 }
+        // Keep the music bubble from colliding with the agent stack bubble.
+        if let other = agentStackPanel, other.isVisible {
+            let otherFrame = other.frame
+            if showingAbove {
+                y = min(y, otherFrame.minY - size.height - 8)
+            } else {
+                y = max(y, otherFrame.maxY + 8)
+            }
+        }
         panel.setFrameOrigin(CGPoint(x: x, y: y))
     }
 
@@ -1244,6 +1332,7 @@ final class MeowyController: NSObject {
         if isJokePaused {
             agentFloatPhase += 0.18
             updateAgentStackPosition()
+            updateMusicPanelPosition()
             if !isJokeBursting {
                 jokeFloatPhase += 0.18
                 updateJokeBubblePosition()
@@ -1272,6 +1361,7 @@ final class MeowyController: NSObject {
         }
         agentFloatPhase += 0.18
         updateAgentStackPosition()
+        updateMusicPanelPosition()
         updateJokeBubblePosition()
         updateNamePanel()
         checkReminderDue()
