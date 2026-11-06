@@ -1388,6 +1388,46 @@ final class MeowyController: NSObject {
         }
     }
 
+    private func dockItemCount() -> Int {
+        var count = 0
+        for key in ["persistent-apps", "persistent-others"] {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+            task.arguments = ["read", "com.apple.dock", key]
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.standardError = Pipe()
+            do {
+                try task.run()
+                task.waitUntilExit()
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let text = String(data: data, encoding: .utf8) ?? ""
+                count += max(0, text.components(separatedBy: "tile-type").count - 1)
+            } catch {
+                continue
+            }
+        }
+        return count == 0 ? 0 : count
+    }
+
+    private func dockTileSize() -> Int {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+        task.arguments = ["read", "com.apple.dock", "tilesize"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        do {
+            try task.run()
+            task.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return Int(text) ?? 48
+        } catch {
+            return 48
+        }
+    }
+
     private func updateDockBounds() {
         guard let screen = NSScreen.screens.first(where: {
             $0.visibleFrame.minY > $0.frame.minY + 1
@@ -1397,8 +1437,15 @@ final class MeowyController: NSObject {
         }
 
         let halfSize = baseCatSize * catScale / 2
-        let minX = screen.frame.minX + halfSize
-        let maxX = screen.frame.maxX - halfSize
+        let count = dockItemCount()
+        let tileCount = count == 0 ? Int(screen.frame.width / CGFloat(dockTileSize() + 4)) : count
+        let tileSize = dockTileSize()
+        let estimatedDockWidth = CGFloat(tileCount) * CGFloat(tileSize + 4) + 20
+        let center = screen.frame.midX
+        var minX = center - estimatedDockWidth / 2 + halfSize
+        var maxX = center + estimatedDockWidth / 2 - halfSize
+        minX = max(screen.frame.minX + halfSize, minX)
+        maxX = min(screen.frame.maxX - halfSize, maxX)
         dockBounds = CGRect(
             x: minX,
             y: screen.visibleFrame.minY + halfSize,
