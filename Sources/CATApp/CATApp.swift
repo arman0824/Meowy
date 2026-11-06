@@ -55,6 +55,14 @@ final class MeowyController: NSObject {
     private var agentStackPanel: NSPanel?
     private var agentStack: NSStackView?
     private var agentFloatPhase: CGFloat = 0
+    private var pomodoroPanel: NSPanel?
+    private var pomodoroLabel: NSTextField?
+    private var pomodoroEnd: Date?
+    private var pomodoroCompletedUntil: Date?
+    private var pomodoroTimer: Timer?
+    private var reminderDue: Date?
+    private var reminderMessage: String = ""
+    private var reminderShowingUntil: Date?
     private var isAgentActive = false
     private var lastClaudeStatus: String?
     private var claudeCompletionUntil: Date?
@@ -157,6 +165,8 @@ final class MeowyController: NSObject {
         jokeFetchTimer?.invalidate()
         jokeFetchTimer = nil
         stopAgentMonitor()
+        pomodoroTimer?.invalidate()
+        pomodoroTimer = nil
         isJokePaused = false
         jokePanel?.orderOut(nil)
         updateActivity()
@@ -485,7 +495,7 @@ final class MeowyController: NSObject {
         for text in texts {
             let label = NSTextField(wrappingLabelWithString: text)
             label.font = NSFont.systemFont(ofSize: 11, weight: .medium)
-            if text.contains("work complete") {
+            if text.contains("work complete") || text.hasPrefix("Reminder:") {
                 label.textColor = .systemGreen
             } else {
                 label.textColor = .labelColor
@@ -536,8 +546,11 @@ final class MeowyController: NSObject {
         var x = center.x - size.width / 2
         x = min(max(x, screen.minX + 8), screen.maxX - size.width - 8)
         var y = center.y + catSize / 2 + 8
-        if y + size.height > screen.maxY - 8 { y = center.y - catSize / 2 - size.height - 8 }
-        y += sin(agentFloatPhase) * 6
+        let showingAbove = y + size.height <= screen.maxY - 8
+        if !showingAbove { y = center.y - catSize / 2 - size.height - 8 }
+        var pomodoroOffset: CGFloat = 0
+        if showingAbove && pomodoroPanel?.isVisible == true { pomodoroOffset = (pomodoroPanel?.frame.height ?? 18) + 8 }
+        y += sin(agentFloatPhase) * 6 + pomodoroOffset
         panel.setFrameOrigin(CGPoint(x: x, y: y))
     }
 
@@ -609,6 +622,139 @@ final class MeowyController: NSObject {
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }
 
+
+    func setReminder(minutes: Double, message: String) {
+        guard minutes > 0 else { return }
+        reminderDue = Date().addingTimeInterval(minutes * 60)
+        reminderMessage = message.isEmpty ? "Reminder" : message
+    }
+
+    func setPomodoro(minutes: Double) {
+        guard minutes > 0 else { return }
+        pomodoroEnd = Date().addingTimeInterval(minutes * 60)
+        pomodoroCompletedUntil = nil
+        updatePomodoroPanel()
+        startPomodoroTimer()
+    }
+
+    private func ensurePomodoroPanel() -> NSPanel {
+        if let panel = pomodoroPanel { return panel }
+        let panel = CatPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.ignoresMouseEvents = true
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 1)
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        let label = NSTextField(labelWithString: "")
+        label.font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .bold)
+        label.textColor = .labelColor
+        label.alignment = .center
+        label.wantsLayer = true
+        label.layer?.backgroundColor = NSColor.clear.cgColor
+        panel.contentView = label
+        pomodoroPanel = panel
+        pomodoroLabel = label
+        return panel
+    }
+
+    func updatePomodoroPanel() {
+        // Completion state: show a green "00" for 7 seconds.
+        if let until = pomodoroCompletedUntil {
+            if Date() >= until {
+                pomodoroCompletedUntil = nil
+                pomodoroTimer?.invalidate()
+                pomodoroTimer = nil
+                pomodoroPanel?.orderOut(nil)
+                return
+            }
+            let panel = ensurePomodoroPanel()
+            guard let label = pomodoroLabel else { return }
+            label.textColor = .systemGreen
+            label.stringValue = "00"
+            label.sizeToFit()
+            let w = label.frame.width + 8
+            let h = label.frame.height + 4
+            label.frame = NSRect(x: 4, y: 2, width: label.frame.width, height: label.frame.height)
+            panel.setFrame(NSRect(x: 0, y: 0, width: w, height: h), display: true)
+            updatePomodoroPosition()
+            panel.orderFrontRegardless()
+            return
+        }
+
+        guard let end = pomodoroEnd else {
+            pomodoroTimer?.invalidate()
+            pomodoroTimer = nil
+            pomodoroPanel?.orderOut(nil)
+            return
+        }
+        let remaining = end.timeIntervalSinceNow
+        if remaining <= 0 {
+            NSSound(contentsOf: URL(fileURLWithPath: "/System/Library/Sounds/Blow.aiff"), byReference: true)?.play()
+            pomodoroEnd = nil
+            pomodoroCompletedUntil = Date().addingTimeInterval(7)
+            updatePomodoroPanel()
+            return
+        }
+        let panel = ensurePomodoroPanel()
+        guard let label = pomodoroLabel else { return }
+        label.textColor = .labelColor
+        label.stringValue = formatPomodoroTime(remaining)
+        label.sizeToFit()
+        let w = label.frame.width + 8
+        let h = label.frame.height + 4
+        label.frame = NSRect(x: 4, y: 2, width: label.frame.width, height: label.frame.height)
+        panel.setFrame(NSRect(x: 0, y: 0, width: w, height: h), display: true)
+        updatePomodoroPosition()
+        panel.orderFrontRegardless()
+    }
+
+    private func startPomodoroTimer() {
+        pomodoroTimer?.invalidate()
+        let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async { [weak self] in self?.updatePomodoroPanel() }
+        }
+        timer.tolerance = 0.05
+        RunLoop.main.add(timer, forMode: .common)
+        pomodoroTimer = timer
+    }
+
+    private func formatPomodoroTime(_ t: TimeInterval) -> String {
+        let total = Int(t.rounded(.up))
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
+        if m > 0 { return String(format: "%d:%02d", m, s) }
+        return String(format: "%ds", s)
+    }
+
+    private func updatePomodoroPosition() {
+        guard let panel = pomodoroPanel, panel.isVisible else { return }
+        let center = simulation.state.position
+        let catSize = baseCatSize * catScale
+        let size = panel.frame.size
+        let screen = DesktopGeometry.nearestScreen(to: center, screens: screens)
+        var x = center.x - size.width / 2
+        x = min(max(x, screen.minX + 4), screen.maxX - size.width - 4)
+        let y = center.y + catSize / 2 + 2
+        panel.setFrameOrigin(CGPoint(x: x, y: y))
+    }
+
+
+    private func checkReminderDue() {
+        guard let due = reminderDue, Date() >= due else { return }
+        reminderDue = nil
+        if !reminderMessage.isEmpty {
+            showAgentStack(["Reminder: " + reminderMessage])
+            // color green? showAgentStack currently labels default; we'll leave green via separate? For now generic.
+        }
+        // play sound
+        NSSound(contentsOf: URL(fileURLWithPath: "/System/Library/Sounds/Blow.aiff"), byReference: true)?.play()
+        // green text: reuse agent stack with green? We'll mark by message prefix "Reminder" handle in showAgentStack coloring
+        reminderShowingUntil = Date().addingTimeInterval(7)
+    }
+
     func shutDown() {
         stop()
         NotificationCenter.default.removeObserver(self)
@@ -645,6 +791,8 @@ final class MeowyController: NSObject {
             updateNamePanel()
             agentFloatPhase += 0.18
             updateAgentStackPosition()
+            checkReminderDue()
+            updatePomodoroPanel()
             drawCat()
             return
         }
@@ -663,6 +811,8 @@ final class MeowyController: NSObject {
         updateNamePanel()
         agentFloatPhase += 0.18
         updateAgentStackPosition()
+        checkReminderDue()
+        updatePomodoroPanel()
         drawCat()
     }
 
@@ -841,10 +991,12 @@ final class MeowyController: NSObject {
         let center = simulation.state.position
         let size = panel.frame.size
         let floatOffset = isJokeBursting ? 0 : sin(jokeFloatPhase) * 6
+        var pomodoroOffset: CGFloat = 0
+        if pomodoroPanel?.isVisible == true { pomodoroOffset = (pomodoroPanel?.frame.height ?? 18) + 8 }
         let screen = DesktopGeometry.nearestScreen(to: center, screens: screens)
         var originX = center.x - size.width / 2
         originX = min(max(originX, screen.minX + 8), screen.maxX - size.width - 8)
-        let aboveY = center.y + catSize / 2 + 10 + floatOffset
+        let aboveY = center.y + catSize / 2 + 10 + floatOffset + pomodoroOffset
         let belowY = center.y - catSize / 2 - size.height - 10 + floatOffset
         var originY = aboveY
         if aboveY + size.height > screen.maxY - 8 {
@@ -1001,6 +1153,10 @@ private final class StatusBarController: NSObject {
     private let jokeSourceSubMenu = NSMenu(title: "Joke Source")
     private var jokeSourceMenuItems: [NSMenuItem] = []
     private let agentsItem = NSMenuItem(title: "Agents", action: nil, keyEquivalent: "")
+    private let actionItemsItem = NSMenuItem(title: "Action Items", action: nil, keyEquivalent: "")
+    private let actionItemsSubMenu = NSMenu(title: "Action Items")
+    private let reminderItem = NSMenuItem(title: "Reminder…", action: #selector(setReminder), keyEquivalent: "")
+    private let pomodoroItem = NSMenuItem(title: "Pomodoro…", action: #selector(setPomodoro), keyEquivalent: "")
     private let agentsEnabledItem = NSMenuItem(title: "Enabled", action: #selector(toggleAgents), keyEquivalent: "")
     private var agentsSubMenu = NSMenu(title: "Agents")
     private let catNameItem = NSMenuItem(title: "Cat Name…", action: #selector(setCatName), keyEquivalent: "")
@@ -1032,6 +1188,8 @@ private final class StatusBarController: NSObject {
         dockItem.target = self
         jokesEnabledItem.target = self
         agentsEnabledItem.target = self
+        reminderItem.target = self
+        pomodoroItem.target = self
 
         jokesSubMenu = NSMenu(title: "Jokes")
         jokesSubMenu.addItem(jokesEnabledItem)
@@ -1052,6 +1210,10 @@ private final class StatusBarController: NSObject {
         claudeItem.state = .on
         agentsSubMenu.addItem(claudeItem)
         agentsItem.submenu = agentsSubMenu
+
+        actionItemsSubMenu.addItem(reminderItem)
+        actionItemsSubMenu.addItem(pomodoroItem)
+        actionItemsItem.submenu = actionItemsSubMenu
         catNameItem.target = self
         quitItem.target = self
         menu.addItem(toggleItem)
@@ -1061,6 +1223,7 @@ private final class StatusBarController: NSObject {
         menu.addItem(.separator())
         menu.addItem(jokesItem)
         menu.addItem(agentsItem)
+        menu.addItem(actionItemsItem)
         menu.addItem(.separator())
         menu.addItem(catNameItem)
         menu.addItem(.separator())
@@ -1105,6 +1268,7 @@ private final class StatusBarController: NSObject {
             meowy.stop()
         } else {
             meowy.start()
+        meowy.setPomodoro(minutes: 0.05)
         }
         updateMenuState()
     }
@@ -1154,6 +1318,46 @@ private final class StatusBarController: NSObject {
         alert.addButton(withTitle: "Cancel")
         if alert.runModal() == .alertFirstButtonReturn {
             meowy.setCatName(field.stringValue)
+        }
+    }
+
+
+    @objc private func setReminder() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Reminder"
+        alert.informativeText = "Minutes from now and message"
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.spacing = 8
+        let minutesField = NSTextField(string: "5")
+        minutesField.placeholderString = "Minutes"
+        let messageField = NSTextField(string: "")
+        messageField.placeholderString = "Message"
+        stack.addArrangedSubview(minutesField)
+        stack.addArrangedSubview(messageField)
+        alert.accessoryView = stack
+        alert.addButton(withTitle: "Set")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {
+            let mins = Double(minutesField.stringValue) ?? 0
+            meowy.setReminder(minutes: mins, message: messageField.stringValue)
+        }
+    }
+
+    @objc private func setPomodoro() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "Pomodoro"
+        alert.informativeText = "Minutes"
+        let field = NSTextField(string: "25")
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Start")
+        alert.addButton(withTitle: "Cancel")
+        if alert.runModal() == .alertFirstButtonReturn {
+            let mins = Double(field.stringValue) ?? 25
+            meowy.setPomodoro(minutes: mins)
+            meowy.updatePomodoroPanel()
         }
     }
 
