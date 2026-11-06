@@ -404,6 +404,26 @@ final class MeowyController: NSObject {
         return "Bash"
     }
 
+    private static func codexAssistantMessageText(from payload: [String: Any]) -> String? {
+        if let content = payload["content"] as? [[String: Any]] {
+            for item in content {
+                if (item["type"] as? String) == "output_text" || (item["type"] as? String) == "text",
+                   let text = item["text"] as? String, !text.isEmpty {
+                    return text
+                }
+            }
+            for item in content {
+                if let text = item["text"] as? String, !text.isEmpty {
+                    return text
+                }
+            }
+        }
+        if let text = payload["text"] as? String, !text.isEmpty {
+            return text
+        }
+        return nil
+    }
+
     private func codexActivity() -> (busy: Bool, activity: String?) {
         guard let url = latestCodexSessionFile(),
               let data = try? Data(contentsOf: url),
@@ -427,6 +447,15 @@ final class MeowyController: NSObject {
                     activity = "Thinking"
                 case "task_complete":
                     lastComplete = index
+                case "agent_message":
+                    if index > lastStarted, lastStarted > lastComplete,
+                       let message = payload?["message"] as? String {
+                        let cleaned = message.trimmingCharacters(in: .whitespacesAndNewlines)
+                            .replacingOccurrences(of: "\\n", with: " ")
+                        if !cleaned.isEmpty {
+                            activity = String(cleaned.prefix(90))
+                        }
+                    }
                 case "patch_apply_begin", "patch_apply_end":
                     if index > lastStarted, lastStarted > lastComplete {
                         activity = "Using Edit"
@@ -440,6 +469,15 @@ final class MeowyController: NSObject {
                 case "function_call", "custom_tool_call":
                     if let name = payload?["name"] as? String {
                         activity = "Using " + codexActivityToolName(name, input: payload?["input"] as? String)
+                    }
+                case "message":
+                    if (payload?["role"] as? String) == "assistant",
+                       let message = Self.codexAssistantMessageText(from: payload ?? [:]) {
+                        let cleaned = message.trimmingCharacters(in: .whitespacesAndNewlines)
+                            .replacingOccurrences(of: "\\n", with: " ")
+                        if !cleaned.isEmpty {
+                            activity = String(cleaned.prefix(90))
+                        }
                     }
                 case "reasoning":
                     activity = "Thinking"
