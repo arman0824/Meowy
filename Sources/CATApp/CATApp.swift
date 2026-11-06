@@ -1169,15 +1169,18 @@ final class MeowyController: NSObject {
             return
         }
         let speedMultiplier = speedPercent / 100
-        if mode == .dock {
-            simulation.stepOnDock(in: dockBounds, speed: 8 * speedMultiplier)
-        } else {
-            simulation.step(
-                toward: NSEvent.mouseLocation,
-                screens: screens,
-                inset: baseCatSize * catScale / 2,
-                speed: 10 * speedMultiplier,
-            )
+        // Freeze movement while an alert jump is playing so the cat does not walk sideways.
+        if !isJumpingAlertActive {
+            if mode == .dock {
+                simulation.stepOnDock(in: dockBounds, speed: 8 * speedMultiplier)
+            } else {
+                simulation.step(
+                    toward: NSEvent.mouseLocation,
+                    screens: screens,
+                    inset: baseCatSize * catScale / 2,
+                    speed: 10 * speedMultiplier,
+                )
+            }
         }
         agentFloatPhase += 0.18
         updateAgentStackPosition()
