@@ -442,7 +442,24 @@ final class MeowyController: NSObject {
         for line in lines.reversed() {
             guard let obj = try? JSONSerialization.jsonObject(with: Data(String(line).utf8)) as? [String: Any],
                   let message = obj["message"] as? [String: Any],
-                  (message["role"] as? String) == "assistant" else { continue }
+                  let role = message["role"] as? String else { continue }
+            if role == "user" {
+                // Ignore tool results and internal/system messages; a real prompt means Claude is thinking.
+                if let content = message["content"] as? [[String: Any]],
+                   content.contains(where: { ($0["type"] as? String) == "tool_result" }) {
+                    continue
+                }
+                var isPrompt = false
+                if let content = message["content"] as? String {
+                    let cleaned = content.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !cleaned.isEmpty && !cleaned.contains("<system-reminder>") { isPrompt = true }
+                } else if let content = message["content"] as? [[String: Any]] {
+                    isPrompt = content.contains(where: { ($0["type"] as? String) == "text" })
+                }
+                if isPrompt { return "Thinking" }
+                continue
+            }
+            guard role == "assistant" else { continue }
             // tool use
             if let content = message["content"] as? [[String: Any]] {
                 for item in content {
