@@ -1406,7 +1406,6 @@ private final class StatusBarController: NSObject {
             meowy.stop()
         } else {
             meowy.start()
-        meowy.setPomodoro(minutes: 0.05)
         }
         updateMenuState()
     }
