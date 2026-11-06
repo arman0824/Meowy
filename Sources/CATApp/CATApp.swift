@@ -976,19 +976,28 @@ final class MeowyController: NSObject {
         panel.ignoresMouseEvents = true
         panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 2)
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        let container = NSView()
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.94).cgColor
+        container.layer?.cornerRadius = messageCornerRadius
+        container.layer?.masksToBounds = true
+        container.layer?.borderWidth = messageBorderWidth
+        container.layer?.borderColor = NSColor.separatorColor.cgColor
         let label = NSTextField(labelWithString: "")
         label.font = messageFont
         label.textColor = .labelColor
         label.alignment = .center
         label.lineBreakMode = .byWordWrapping
+        label.usesSingleLineMode = false
+        label.maximumNumberOfLines = 0
+        label.cell?.wraps = true
         label.preferredMaxLayoutWidth = messageTextWidth
-        label.wantsLayer = true
-        label.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.94).cgColor
-        label.layer?.cornerRadius = messageCornerRadius
-        label.layer?.masksToBounds = true
-        label.layer?.borderWidth = messageBorderWidth
-        label.layer?.borderColor = NSColor.separatorColor.cgColor
-        panel.contentView = label
+        label.isBezeled = false
+        label.isBordered = false
+        label.backgroundColor = .clear
+        label.drawsBackground = false
+        container.addSubview(label)
+        panel.contentView = container
         musicPanel = panel
         musicLabel = label
         return panel
@@ -1003,11 +1012,19 @@ final class MeowyController: NSObject {
         guard let label = musicLabel else { return }
         label.stringValue = text
         label.preferredMaxLayoutWidth = messageTextWidth
-        let fit = label.fittingSize
+        var fit = label.fittingSize
         let width = min(max(fit.width + messageHorizontalPadding * 2, messageMinWidth), messageMaxWidth)
+        label.preferredMaxLayoutWidth = min(width - messageHorizontalPadding * 2, messageTextWidth)
+        fit = label.fittingSize
         let height = max(fit.height + messageVerticalPadding * 2, 24)
         panel.setFrame(CGRect(x: 0, y: 0, width: width, height: height), display: true)
-        label.frame = panel.contentView?.bounds ?? CGRect(x: 0, y: 0, width: width, height: height)
+        if let container = panel.contentView {
+            label.frame = CGRect(x: messageHorizontalPadding,
+                                 y: (height - fit.height) / 2,
+                                 width: width - messageHorizontalPadding * 2,
+                                 height: fit.height)
+            container.needsDisplay = true
+        }
         updateMusicPanelPosition()
         panel.orderFrontRegardless()
     }
@@ -1023,15 +1040,17 @@ final class MeowyController: NSObject {
         var y = center.y + catSize / 2 + 8
         let showingAbove = y + size.height <= screen.maxY - 8
         if !showingAbove { y = center.y - catSize / 2 - size.height - 8 }
-        // Keep the music bubble from colliding with the agent stack bubble.
-        if let other = agentStackPanel, other.isVisible {
-            let otherFrame = other.frame
+
+        for other in [agentStackPanel, jokePanel] {
+            guard let panel = other, panel.isVisible else { continue }
+            let frame = panel.frame
             if showingAbove {
-                y = min(y, otherFrame.minY - size.height - 8)
+                y = max(y, frame.maxY + 8)
             } else {
-                y = max(y, otherFrame.maxY + 8)
+                y = min(y, frame.minY - size.height - 8)
             }
         }
+        y = min(max(y, screen.minY + 8), screen.maxY - size.height - 8)
         panel.setFrameOrigin(CGPoint(x: x, y: y))
     }
 
