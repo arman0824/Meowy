@@ -31,11 +31,12 @@ Click the cat icon in the menu bar to choose:
 - **Live on Dock** — wanders along the Dock, pauses to scratch or relax, and takes occasional naps.
 - **Jokes** — toggles the 5-minute joke bubble while docked.
 - **Joke Source** — choose between Dark Jokes, Dad Jokes, Advice, and Quotes.
-- **Agents** — toggles terminal-agent status bubbles.
+- **Agents** — submenu to enable/disable agent monitoring and choose which agents are monitored (Claude, Codex, Cursor).
+- **Music** — submenu to enable/disable the now-playing bubble and choose Apple Music and/or Spotify as sources.
 - **Action Items** — set reminders and pomodoro timers that appear in floating bubbles.
 - **Cat Name** — rename the cat; hovering over the cat shows its name.
-- **Size** — adjusts the cat from 50% to 250%.
-- **Speed** — adjusts movement from 25% to 200%.
+- **Size** — adjusts the cat from 50% to 300% (entered as a percentage).
+- **Speed** — adjusts movement from 50% to 300% (entered as a percentage).
 - **Quit Meowy**
 
 Meowy remembers its position, size, speed, mode, joke/agent preferences, and selected cat name. Reduced Motion pauses the pet.

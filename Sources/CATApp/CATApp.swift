@@ -23,11 +23,16 @@ private let speedKey = "meowy-cat-speed"
 private let jokesKey = "meowy-cat-jokes"
 private let jokeSourceKey = "meowy-cat-joke-source"
 private let agentsKey = "meowy-cat-agents"
+private let claudeAgentEnabledKey = "meowy-cat-agent-claude"
+private let codexAgentEnabledKey = "meowy-cat-agent-codex"
+private let cursorAgentEnabledKey = "meowy-cat-agent-cursor"
 private let musicKey = "meowy-cat-music"
+private let musicAppleKey = "meowy-cat-music-apple"
+private let musicSpotifyKey = "meowy-cat-music-spotify"
 private let catNameKey = "meowy-cat-name"
 private let displayNameKey = "meowy-cat-display-name"
-private let minimumSpeedPercent: CGFloat = 25
-private let maximumSpeedPercent: CGFloat = 200
+private let minimumSpeedPercent: CGFloat = 50
+private let maximumSpeedPercent: CGFloat = 300
 private let baseCatSize: CGFloat = 32
 private let messageFont = NSFont.systemFont(ofSize: 12, weight: .medium)
 private let messageCornerRadius: CGFloat = 12
@@ -57,12 +62,20 @@ final class MeowyController: NSObject {
     private var timer: Timer?
     private var screens: [CGRect] = []
     private var dockBounds = CGRect.zero
+    private var cachedDockItemCount = 0
+    private var cachedDockTileSize = 48
+    private var cachedDockAutoHide = false
     private var isSuspended = false
     private(set) var isRunning = false
     private(set) var jokesEnabled: Bool
     private(set) var jokeSource: JokeSource
     private(set) var agentsEnabled: Bool
+    private(set) var claudeAgentEnabled: Bool
+    private(set) var codexAgentEnabled: Bool
+    private(set) var cursorAgentEnabled: Bool
     private(set) var musicEnabled: Bool
+    private(set) var musicAppleEnabled: Bool
+    private(set) var musicSpotifyEnabled: Bool
     private var agentMonitorTimer: Timer?
     private var agentStackPanel: NSPanel?
     private var agentStack: NSStackView?
@@ -126,10 +139,23 @@ final class MeowyController: NSObject {
         } else {
             self.agentsEnabled = true
         }
+        self.claudeAgentEnabled = defaults.object(forKey: claudeAgentEnabledKey) as? Bool ?? true
+        self.codexAgentEnabled = defaults.object(forKey: codexAgentEnabledKey) as? Bool ?? true
+        self.cursorAgentEnabled = defaults.object(forKey: cursorAgentEnabledKey) as? Bool ?? true
         if let storedMusic = defaults.object(forKey: musicKey) as? Bool {
             self.musicEnabled = storedMusic
         } else {
             self.musicEnabled = true
+        }
+        if let storedApple = defaults.object(forKey: musicAppleKey) as? Bool {
+            self.musicAppleEnabled = storedApple
+        } else {
+            self.musicAppleEnabled = true
+        }
+        if let storedSpotify = defaults.object(forKey: musicSpotifyKey) as? Bool {
+            self.musicSpotifyEnabled = storedSpotify
+        } else {
+            self.musicSpotifyEnabled = true
         }
         self.catName = defaults.string(forKey: catNameKey) ?? "Meowy"
         let saved = defaults.data(forKey: stateKey)
@@ -220,7 +246,7 @@ final class MeowyController: NSObject {
     }
 
     func setScale(_ scale: CGFloat) {
-        catScale = min(max(scale, 0.5), 2.5)
+        catScale = min(max(scale, 0.5), 3.0)
         defaults.set(Double(catScale), forKey: scaleKey)
         updateDockBounds()
         constrainPosition()
@@ -232,7 +258,7 @@ final class MeowyController: NSObject {
                    y: simulation.state.position.y - catSize / 2,
                    width: catSize,
                    height: catSize),
-            display: true,
+            display: false,
         )
         drawCat()
     }
@@ -290,6 +316,45 @@ final class MeowyController: NSObject {
             isAgentActive = false
             agentBubbleHideIfPossible()
         }
+    }
+
+    func setClaudeAgentEnabled(_ enabled: Bool) {
+        claudeAgentEnabled = enabled
+        defaults.set(enabled, forKey: claudeAgentEnabledKey)
+    }
+
+    func setCodexAgentEnabled(_ enabled: Bool) {
+        codexAgentEnabled = enabled
+        defaults.set(enabled, forKey: codexAgentEnabledKey)
+    }
+
+    func setCursorAgentEnabled(_ enabled: Bool) {
+        cursorAgentEnabled = enabled
+        defaults.set(enabled, forKey: cursorAgentEnabledKey)
+    }
+
+    func setMusicEnabled(_ enabled: Bool) {
+        musicEnabled = enabled
+        defaults.set(enabled, forKey: musicKey)
+        if enabled {
+            if isRunning, agentMonitorTimer == nil { startAgentMonitor() }
+            updateActivity()
+        } else {
+            musicPanel?.orderOut(nil)
+            if isRunning, !agentsEnabled { stopAgentMonitor() }
+        }
+    }
+
+    func setMusicAppleEnabled(_ enabled: Bool) {
+        musicAppleEnabled = enabled
+        defaults.set(enabled, forKey: musicAppleKey)
+        if !enabled { musicPanel?.orderOut(nil) }
+    }
+
+    func setMusicSpotifyEnabled(_ enabled: Bool) {
+        musicSpotifyEnabled = enabled
+        defaults.set(enabled, forKey: musicSpotifyKey)
+        if !enabled { musicPanel?.orderOut(nil) }
     }
 
     func startAgentMonitor() {
@@ -543,8 +608,8 @@ final class MeowyController: NSObject {
     }
 
     private func currentMusicTrack() -> String? {
-        if let track = appleScriptMusicTrack(app: "Music") { return track }
-        if let track = appleScriptMusicTrack(app: "Spotify") { return track }
+        if musicAppleEnabled, let track = appleScriptMusicTrack(app: "Music") { return track }
+        if musicSpotifyEnabled, let track = appleScriptMusicTrack(app: "Spotify") { return track }
         return nil
     }
 
@@ -596,7 +661,7 @@ final class MeowyController: NSObject {
         // Claude sessions
         var claudeBusy = false
         let sessions = detectedClaudeSessions()
-        if !sessions.isEmpty {
+        if claudeAgentEnabled, !sessions.isEmpty {
             for session in sessions {
                 if session.status == "busy" {
                     claudeBusy = true
@@ -620,7 +685,7 @@ final class MeowyController: NSObject {
 
         // Codex sessions
         var codexBusy = false
-        if isExactProcess("codex") {
+        if codexAgentEnabled, isExactProcess("codex") {
             let info = codexActivity()
             if info.busy {
                 codexBusy = true
@@ -641,7 +706,7 @@ final class MeowyController: NSObject {
         }
 
         // Cursor IDE and Cursor Agent CLI sessions
-        if isCursorProcessRunning() {
+        if cursorAgentEnabled, isCursorProcessRunning() {
             let info = cursorActivity()
             if info.busy {
                 statuses.append("Cursor: " + (info.activity ?? "working"))
@@ -1688,10 +1753,10 @@ final class MeowyController: NSObject {
         let halfSize = baseCatSize * catScale / 2
         var minX = screen.frame.minX + halfSize
         var maxX = screen.frame.maxX - halfSize
-        if !dockAutoHide() {
-            let count = dockItemCount()
-            let tileCount = count == 0 ? Int(screen.frame.width / CGFloat(dockTileSize() + 4)) : count
-            let tileSize = dockTileSize()
+        if !cachedDockAutoHide {
+            let count = cachedDockItemCount
+            let tileCount = count == 0 ? Int(screen.frame.width / CGFloat(cachedDockTileSize + 4)) : count
+            let tileSize = cachedDockTileSize
             let estimatedDockWidth = CGFloat(tileCount) * CGFloat(tileSize + 4) + 20
             let center = screen.frame.midX
             minX = max(screen.frame.minX + halfSize, center - estimatedDockWidth / 2 + halfSize)
@@ -1711,6 +1776,9 @@ final class MeowyController: NSObject {
         if !simulation.state.position.x.isFinite || !simulation.state.position.y.isFinite {
             simulation.state = CatState()
         }
+        cachedDockItemCount = dockItemCount()
+        cachedDockTileSize = dockTileSize()
+        cachedDockAutoHide = dockAutoHide()
         updateDockBounds()
         constrainPosition()
         drawCat()
@@ -1749,7 +1817,7 @@ private final class CatSizeMenuView: NSView {
         valueLabel.frame = NSRect(x: 12, y: 32, width: 216, height: 16)
         updateValue(value)
 
-        slider.isContinuous = true
+        slider.isContinuous = false
         slider.frame = NSRect(x: 12, y: 6, width: 216, height: 20)
 
         addSubview(valueLabel)
@@ -1785,7 +1853,7 @@ private final class CatSpeedMenuView: NSView {
         valueLabel.frame = NSRect(x: 12, y: 32, width: 216, height: 16)
         updateValue(value)
 
-        slider.isContinuous = true
+        slider.isContinuous = false
         slider.frame = NSRect(x: 12, y: 6, width: 216, height: 20)
 
         addSubview(valueLabel)
@@ -1794,6 +1862,62 @@ private final class CatSpeedMenuView: NSView {
 
     func updateValue(_ value: Double) {
         valueLabel.stringValue = "Speed: \(Int(value.rounded()))%"
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+private final class CatSizeSpeedMenuView: NSView {
+    let sizeField: NSTextField
+    let speedField: NSTextField
+    private let sizeLabel: NSTextField
+    private let speedLabel: NSTextField
+
+    init(target: AnyObject, sizeAction: Selector, speedAction: Selector, size: Double, speed: Double) {
+        sizeLabel = NSTextField(labelWithString: "Size %")
+        speedLabel = NSTextField(labelWithString: "Speed %")
+        sizeField = NSTextField(frame: .zero)
+        speedField = NSTextField(frame: .zero)
+
+        super.init(frame: NSRect(x: 0, y: 0, width: 260, height: 56))
+
+        [sizeLabel, speedLabel].forEach {
+            $0.font = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
+            $0.isBezeled = false
+            $0.isBordered = false
+            $0.isEditable = false
+            $0.isEnabled = false
+            $0.backgroundColor = .clear
+            $0.drawsBackground = false
+            addSubview($0)
+        }
+
+        for field in [sizeField, speedField] {
+            field.font = NSFont.menuFont(ofSize: NSFont.smallSystemFontSize)
+            field.alignment = .center
+            field.target = target
+            field.bezelStyle = .roundedBezel
+            field.isBordered = true
+            field.drawsBackground = true
+            addSubview(field)
+        }
+
+        sizeField.action = sizeAction
+        speedField.action = speedAction
+        sizeField.stringValue = "\(Int((size * 100).rounded()))"
+        speedField.stringValue = "\(Int(speed.rounded()))"
+
+        sizeLabel.frame = NSRect(x: 14, y: 34, width: 118, height: 16)
+        sizeField.frame = NSRect(x: 14, y: 8, width: 118, height: 24)
+        speedLabel.frame = NSRect(x: 140, y: 34, width: 106, height: 16)
+        speedField.frame = NSRect(x: 140, y: 8, width: 106, height: 24)
+    }
+
+    func updateValues(size: Double, speed: Double) {
+        sizeField.stringValue = "\(Int((size * 100).rounded()))"
+        speedField.stringValue = "\(Int(speed.rounded()))"
     }
 
     required init?(coder: NSCoder) {
@@ -1820,18 +1944,23 @@ private final class StatusBarController: NSObject {
     private let reminderItem = NSMenuItem(title: "Reminder", action: #selector(setReminder), keyEquivalent: "")
     private let pomodoroItem = NSMenuItem(title: "Pomodoro", action: #selector(setPomodoro), keyEquivalent: "")
     private let agentsEnabledItem = NSMenuItem(title: "Enabled", action: #selector(toggleAgents), keyEquivalent: "")
+    private let claudeAgentItem = NSMenuItem(title: "Claude", action: #selector(toggleClaudeAgent), keyEquivalent: "")
+    private let codexAgentItem = NSMenuItem(title: "Codex", action: #selector(toggleCodexAgent), keyEquivalent: "")
+    private let cursorAgentItem = NSMenuItem(title: "Cursor", action: #selector(toggleCursorAgent), keyEquivalent: "")
+    private let musicItem = NSMenuItem(title: "Music", action: nil, keyEquivalent: "")
+    private let musicSubMenu = NSMenu(title: "Music")
+    private var musicEnabledSubItem = NSMenuItem(title: "Enabled", action: #selector(toggleMusic), keyEquivalent: "")
+    private let musicAppleItem = NSMenuItem(title: "Apple Music", action: #selector(toggleMusicApple), keyEquivalent: "")
+    private let musicSpotifyItem = NSMenuItem(title: "Spotify", action: #selector(toggleMusicSpotify), keyEquivalent: "")
     private var agentsSubMenu = NSMenu(title: "Agents")
     private let catNameItem = NSMenuItem(title: "Cat Name", action: #selector(setCatName), keyEquivalent: "")
     private let quitItem = NSMenuItem(title: "Quit Meowy", action: #selector(quit), keyEquivalent: "q")
-    private lazy var sizeMenuView = CatSizeMenuView(
+    private lazy var sizeSpeedMenuView = CatSizeSpeedMenuView(
         target: self,
-        action: #selector(sizeChanged(_:)),
-        value: Double(meowy.scale),
-    )
-    private lazy var speedMenuView = CatSpeedMenuView(
-        target: self,
-        action: #selector(speedChanged(_:)),
-        value: Double(meowy.speed),
+        sizeAction: #selector(sizeChanged(_:)),
+        speedAction: #selector(speedChanged(_:)),
+        size: Double(meowy.scale),
+        speed: Double(meowy.speed),
     )
 
     init(meowy: MeowyController) {
@@ -1850,6 +1979,12 @@ private final class StatusBarController: NSObject {
         dockItem.target = self
         jokesEnabledItem.target = self
         agentsEnabledItem.target = self
+        claudeAgentItem.target = self
+        codexAgentItem.target = self
+        cursorAgentItem.target = self
+        musicEnabledSubItem.target = self
+        musicAppleItem.target = self
+        musicSpotifyItem.target = self
         reminderItem.target = self
         pomodoroItem.target = self
 
@@ -1868,14 +2003,8 @@ private final class StatusBarController: NSObject {
         agentsSubMenu = NSMenu(title: "Agents")
         agentsSubMenu.addItem(agentsEnabledItem)
         agentsSubMenu.addItem(.separator())
-        let claudeItem = NSMenuItem(title: "Claude", action: nil, keyEquivalent: "")
-        claudeItem.state = .on
-        agentsSubMenu.addItem(claudeItem)
-        let codexItem = NSMenuItem(title: "Codex", action: nil, keyEquivalent: "")
-        codexItem.state = .on
-        agentsSubMenu.addItem(codexItem)
-        let cursorAgentItem = NSMenuItem(title: "Cursor", action: nil, keyEquivalent: "")
-        cursorAgentItem.state = .on
+        agentsSubMenu.addItem(claudeAgentItem)
+        agentsSubMenu.addItem(codexAgentItem)
         agentsSubMenu.addItem(cursorAgentItem)
         agentsItem.submenu = agentsSubMenu
 
@@ -1892,15 +2021,19 @@ private final class StatusBarController: NSObject {
         menu.addItem(jokesItem)
         menu.addItem(agentsItem)
         menu.addItem(actionItemsItem)
+        musicSubMenu.removeAllItems()
+        musicSubMenu.addItem(musicEnabledSubItem)
+        musicSubMenu.addItem(.separator())
+        musicSubMenu.addItem(musicAppleItem)
+        musicSubMenu.addItem(musicSpotifyItem)
+        musicItem.submenu = musicSubMenu
+        menu.addItem(musicItem)
         menu.addItem(.separator())
         menu.addItem(catNameItem)
         menu.addItem(.separator())
-        let sizeItem = NSMenuItem()
-        sizeItem.view = sizeMenuView
-        menu.addItem(sizeItem)
-        let speedItem = NSMenuItem()
-        speedItem.view = speedMenuView
-        menu.addItem(speedItem)
+        let sizeSpeedItem = NSMenuItem()
+        sizeSpeedItem.view = sizeSpeedMenuView
+        menu.addItem(sizeSpeedItem)
         menu.addItem(.separator())
         menu.addItem(quitItem)
         updateMenuState()
@@ -1916,6 +2049,14 @@ private final class StatusBarController: NSObject {
             item.isEnabled = meowy.jokesEnabled
         }
         agentsEnabledItem.state = meowy.agentsEnabled ? .on : .off
+        claudeAgentItem.state = meowy.claudeAgentEnabled ? .on : .off
+        codexAgentItem.state = meowy.codexAgentEnabled ? .on : .off
+        cursorAgentItem.state = meowy.cursorAgentEnabled ? .on : .off
+        musicEnabledSubItem.state = meowy.musicEnabled ? .on : .off
+        musicAppleItem.state = meowy.musicAppleEnabled ? .on : .off
+        musicSpotifyItem.state = meowy.musicSpotifyEnabled ? .on : .off
+        musicAppleItem.isEnabled = meowy.musicEnabled
+        musicSpotifyItem.isEnabled = meowy.musicEnabled
         for item in agentsSubMenu.items where item != agentsEnabledItem {
             item.isEnabled = meowy.agentsEnabled
         }
@@ -1964,14 +2105,46 @@ private final class StatusBarController: NSObject {
         updateMenuState()
     }
 
-    @objc private func sizeChanged(_ sender: NSSlider) {
-        meowy.setScale(CGFloat(sender.doubleValue))
-        sizeMenuView.updateValue(sender.doubleValue)
+    @objc private func toggleClaudeAgent() {
+        meowy.setClaudeAgentEnabled(!meowy.claudeAgentEnabled)
+        updateMenuState()
     }
 
-    @objc private func speedChanged(_ sender: NSSlider) {
-        meowy.setSpeedPercent(CGFloat(sender.doubleValue))
-        speedMenuView.updateValue(sender.doubleValue)
+    @objc private func toggleCodexAgent() {
+        meowy.setCodexAgentEnabled(!meowy.codexAgentEnabled)
+        updateMenuState()
+    }
+
+    @objc private func toggleCursorAgent() {
+        meowy.setCursorAgentEnabled(!meowy.cursorAgentEnabled)
+        updateMenuState()
+    }
+
+    @objc private func toggleMusic() {
+        meowy.setMusicEnabled(!meowy.musicEnabled)
+        updateMenuState()
+    }
+
+    @objc private func toggleMusicApple() {
+        meowy.setMusicAppleEnabled(!meowy.musicAppleEnabled)
+        updateMenuState()
+    }
+
+    @objc private func toggleMusicSpotify() {
+        meowy.setMusicSpotifyEnabled(!meowy.musicSpotifyEnabled)
+        updateMenuState()
+    }
+
+    @objc private func sizeChanged(_ sender: NSTextField) {
+        let value = CGFloat(sender.doubleValue)
+        meowy.setScale(value / 100)
+        sizeSpeedMenuView.updateValues(size: Double(meowy.scale), speed: Double(meowy.speed))
+    }
+
+    @objc private func speedChanged(_ sender: NSTextField) {
+        let value = CGFloat(sender.doubleValue)
+        meowy.setSpeedPercent(value)
+        sizeSpeedMenuView.updateValues(size: Double(meowy.scale), speed: Double(meowy.speed))
     }
 
     @objc private func setCatName() {
