@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 
 enum JokeSource: String, CaseIterable {
     case dark
@@ -43,10 +44,12 @@ private final class CatPanel: NSPanel {
 @MainActor
 final class MeowyController: NSObject {
     private let sprites: SpriteSheet
+    private let jumpFrames: [CGImage]
     private let defaults: UserDefaults
     private let panel: CatPanel
     private let spriteView: SpriteView
     private var simulation: CatSimulation
+    private var jumpFrameCounter = 0
     private var catScale: CGFloat
     private var speedPercent: CGFloat
     private(set) var mode: CatMode
@@ -100,6 +103,7 @@ final class MeowyController: NSObject {
 
     init(sprites: SpriteSheet, defaults: UserDefaults = .standard) {
         self.sprites = sprites
+        self.jumpFrames = Self.loadJumpFrames()
         self.defaults = defaults
         let storedScale = defaults.object(forKey: scaleKey) as? Double ?? 1
         self.catScale = min(max(CGFloat(storedScale), 0.5), 2.5)
@@ -163,6 +167,18 @@ final class MeowyController: NSObject {
         notifications.addObserver(self, selector: #selector(resume), name: NSWorkspace.sessionDidBecomeActiveNotification, object: nil)
         notifications.addObserver(self, selector: #selector(updateActivity),
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
+    }
+
+    private static func loadJumpFrames() -> [CGImage] {
+        guard let url = Bundle.main.url(forResource: "Meowy-jump", withExtension: "gif"),
+              let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return [] }
+        var frames: [CGImage] = []
+        for index in 0..<CGImageSourceGetCount(source) {
+            if let image = CGImageSourceCreateImageAtIndex(source, index, nil) {
+                frames.append(image)
+            }
+        }
+        return frames
     }
 
     func start() {
@@ -1174,9 +1190,24 @@ final class MeowyController: NSObject {
         drawCat()
     }
 
+    private var isJumpingAlertActive: Bool {
+        if let until = reminderShowingUntil, until > Date() { return true }
+        if let until = pomodoroCompletedUntil, until > Date() { return true }
+        if let until = claudeCompletionUntil, until > Date() { return true }
+        if let until = codexCompletionUntil, until > Date() { return true }
+        return false
+    }
+
     private func drawCat() {
         let state = simulation.state
-        spriteView.image = sprites.frame(state.displayedAnimation, index: state.displayedFrame)
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        if !reduceMotion, isJumpingAlertActive, !jumpFrames.isEmpty {
+            spriteView.image = jumpFrames[jumpFrameCounter % jumpFrames.count]
+            jumpFrameCounter += 1
+        } else {
+            jumpFrameCounter = 0
+            spriteView.image = sprites.frame(state.displayedAnimation, index: state.displayedFrame)
+        }
         panel.setFrameOrigin(CGPoint(x: state.position.x - baseCatSize * catScale / 2,
                                      y: state.position.y - baseCatSize * catScale / 2))
     }

@@ -24,6 +24,7 @@ mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$EXECUTABLE" "$APP_DIR/Contents/MacOS/CAT"
 cp "$ROOT_DIR/Info.plist" "$APP_DIR/Contents/Info.plist"
 cp "$ROOT_DIR/Resources/Meowy.gif" "$APP_DIR/Contents/Resources/Meowy.gif"
+cp "$ROOT_DIR/Resources/Meowy-jump.gif" "$APP_DIR/Contents/Resources/Meowy-jump.gif"
 cp "$ROOT_DIR/Resources/Meowy.icns" "$APP_DIR/Contents/Resources/Meowy.icns"
 cp "$ROOT_DIR/Resources/Breeze.wav" "$APP_DIR/Contents/Resources/Breeze.wav"
 
