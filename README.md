@@ -41,12 +41,12 @@ Click the cat icon in the menu bar to choose:
 Meowy remembers its position, size, speed, mode, joke/agent preferences, and selected cat name. Reduced Motion pauses the pet.
 
 ## Agent status
-When **Agents** is enabled, Meowy monitors Claude Code and Codex automatically:
+When **Agents** is enabled, Meowy monitors Claude Code, Codex, and Cursor automatically:
 - Shows “Thinking” while an agent is preparing a response.
 - Shows the current tool activity, such as “Using Bash” or “Using Read”.
 - Shows “work complete” with a notification sound, highlighted in green, then fades after about 7 seconds.
 
-Supported agent processes include Claude Code and Codex.
+Cursor support covers the Cursor IDE agent (when its transcript is actively changing) and Cursor Agent CLI sessions.
 
 ## Reminders and pomodoro
 - **Reminder** — schedule a reminder by minutes from now or by a specific time of day.

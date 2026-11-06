@@ -80,6 +80,8 @@ final class MeowyController: NSObject {
     private var claudeCompletionUntil: Date?
     private var lastCodexStatus: String?
     private var codexCompletionUntil: Date?
+    private var lastCursorStatus: String?
+    private var cursorCompletionUntil: Date?
     private var completionHideTimer: Timer?
     private(set) var catName: String
     private var isNameHovering = false
@@ -301,6 +303,7 @@ final class MeowyController: NSObject {
 
     private func detectedAgentName() -> String? {
         if isExactProcess("claude") { return "Claude Code" }
+        if isExactProcess("cursor-agent") || isExactProcess("agent") || isExactProcess("Cursor") { return "Cursor" }
         return nil
     }
 
@@ -330,6 +333,12 @@ final class MeowyController: NSObject {
 
     private func codexFriendlyToolName(_ name: String) -> String {
         let lower = name.lowercased()
+        if lower.contains("apply_patch") || lower.contains("write") || lower.contains("edit") {
+            return "Edit"
+        }
+        if lower.contains("search") || lower == "rg" || lower.contains("grep") || lower.contains("glob") {
+            return "Search"
+        }
         if lower == "exec" || lower.hasPrefix("exec_") || lower.contains("shell") || lower.contains("bash") || lower.contains("zsh") {
             return "Bash"
         }
@@ -346,6 +355,37 @@ final class MeowyController: NSObject {
             .split(separator: " ")
             .map { $0.prefix(1).uppercased() + $0.dropFirst() }
             .joined(separator: " ")
+    }
+
+    private func codexActivityToolName(_ name: String, input: String?) -> String {
+        let lowerName = name.lowercased()
+        guard lowerName == "exec" || lowerName.hasPrefix("exec_") else {
+            return codexFriendlyToolName(name)
+        }
+
+        let lowerInput = (input ?? "").lowercased()
+        if lowerInput.contains("apply_patch") || lowerInput.contains("write_file") ||
+            lowerInput.contains("filemanager.default.createfile") || lowerInput.contains(" >") {
+            return "Edit"
+        }
+        if lowerInput.contains("rg ") || lowerInput.contains("grep ") ||
+            lowerInput.contains("find ") || lowerInput.contains("glob") {
+            return "Search"
+        }
+        if lowerInput.contains("sed ") || lowerInput.contains("cat ") ||
+            lowerInput.contains("head ") || lowerInput.contains("tail ") ||
+            lowerInput.contains("ls ") || lowerInput.contains("read_file") {
+            return "Read"
+        }
+        if lowerInput.contains(" test") || lowerInput.contains("build.sh") ||
+            lowerInput.contains("npm run") || lowerInput.contains("swiftc ") {
+            return "Test"
+        }
+        if lowerInput.contains("git diff") || lowerInput.contains("git status") ||
+            lowerInput.contains("git log") {
+            return "Git"
+        }
+        return "Bash"
     }
 
     private func codexActivity() -> (busy: Bool, activity: String?) {
@@ -371,6 +411,10 @@ final class MeowyController: NSObject {
                     activity = "Thinking"
                 case "task_complete":
                     lastComplete = index
+                case "patch_apply_begin", "patch_apply_end":
+                    if index > lastStarted, lastStarted > lastComplete {
+                        activity = "Using Edit"
+                    }
                 default:
                     break
                 }
@@ -379,7 +423,7 @@ final class MeowyController: NSObject {
                 switch payload?["type"] as? String {
                 case "function_call", "custom_tool_call":
                     if let name = payload?["name"] as? String {
-                        activity = "Using " + codexFriendlyToolName(name)
+                        activity = "Using " + codexActivityToolName(name, input: payload?["input"] as? String)
                     }
                 case "reasoning":
                     activity = "Thinking"
@@ -391,6 +435,45 @@ final class MeowyController: NSObject {
 
         guard lastStarted > lastComplete else { return (false, nil) }
         return (true, activity ?? "Thinking")
+    }
+
+    private func isCursorProcessRunning() -> Bool {
+        isExactProcess("Cursor") || isExactProcess("cursor-agent") || isExactProcess("agent")
+    }
+
+    private func latestCursorTranscriptDate() -> Date? {
+        let root = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".cursor/projects")
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else { return nil }
+
+        var newest = Date.distantPast
+        while let url = enumerator.nextObject() as? URL {
+            guard ["jsonl", "txt"].contains(url.pathExtension.lowercased()),
+                  url.path.contains("/agent-transcripts/") else { continue }
+            if let values = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
+               let date = values.contentModificationDate, date > newest {
+                newest = date
+            }
+        }
+        return newest == .distantPast ? nil : newest
+    }
+
+    private func cursorActivity() -> (busy: Bool, activity: String?) {
+        // Cursor's terminal agent does not publish local session state, but its process
+        // exists only while it is handling a request.
+        if isExactProcess("cursor-agent") || isExactProcess("agent") {
+            return (true, "Thinking")
+        }
+        // Cursor IDE writes its agent transcripts while a turn is in progress. Using
+        // the transcript timestamp avoids reporting an idle editor as an active agent.
+        guard isExactProcess("Cursor"),
+              let updatedAt = latestCursorTranscriptDate(),
+              Date().timeIntervalSince(updatedAt) < 8 else { return (false, nil) }
+        return (true, "Working")
     }
 
 
@@ -445,12 +528,42 @@ final class MeowyController: NSObject {
             lastCodexStatus = nil
         }
 
+        // Cursor IDE and Cursor Agent CLI sessions
+        if isCursorProcessRunning() {
+            let info = cursorActivity()
+            if info.busy {
+                statuses.append("Cursor: " + (info.activity ?? "working"))
+            } else {
+                if lastCursorStatus == "busy" && !(cursorCompletionUntil.map { $0 > Date() } ?? false) {
+                    cursorCompletionUntil = Date().addingTimeInterval(7)
+                    let url = URL(fileURLWithPath: "/System/Library/Sounds/Blow.aiff")
+                    NSSound(contentsOf: url, byReference: true)?.play()
+                }
+                if cursorCompletionUntil.map({ $0 > Date() }) ?? false {
+                    statuses.append("Cursor: work complete")
+                }
+            }
+            lastCursorStatus = info.busy ? "busy" : "idle"
+        } else {
+            if lastCursorStatus == "busy" && !(cursorCompletionUntil.map { $0 > Date() } ?? false) {
+                cursorCompletionUntil = Date().addingTimeInterval(7)
+                let url = URL(fileURLWithPath: "/System/Library/Sounds/Blow.aiff")
+                NSSound(contentsOf: url, byReference: true)?.play()
+            }
+            if cursorCompletionUntil.map({ $0 > Date() }) ?? false {
+                statuses.append("Cursor: work complete")
+                lastCursorStatus = "idle"
+            } else {
+                lastCursorStatus = nil
+            }
+        }
+
         // Agent message file
         if let fileText = agentMessageFile() { statuses.append(fileText) }
 
-        // OpenCode
         // Generic fallback
-        if statuses.isEmpty, let name = detectedAgentName(), name != "Claude Code" && name != "OpenCode" {
+        if statuses.isEmpty, let name = detectedAgentName(),
+           name != "Claude Code", name != "Cursor" {
             statuses.append("\(name) running")
         }
 
@@ -1463,6 +1576,9 @@ private final class StatusBarController: NSObject {
         let codexItem = NSMenuItem(title: "Codex", action: nil, keyEquivalent: "")
         codexItem.state = .on
         agentsSubMenu.addItem(codexItem)
+        let cursorAgentItem = NSMenuItem(title: "Cursor", action: nil, keyEquivalent: "")
+        cursorAgentItem.state = .on
+        agentsSubMenu.addItem(cursorAgentItem)
         agentsItem.submenu = agentsSubMenu
 
         actionItemsSubMenu.addItem(reminderItem)
