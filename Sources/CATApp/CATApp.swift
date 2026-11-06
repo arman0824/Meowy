@@ -1410,6 +1410,24 @@ final class MeowyController: NSObject {
         return count == 0 ? 0 : count
     }
 
+    private func dockAutoHide() -> Bool {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+        task.arguments = ["read", "com.apple.dock", "autohide"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        do {
+            try task.run()
+            task.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let text = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return text == "1"
+        } catch {
+            return false
+        }
+    }
+
     private func dockTileSize() -> Int {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
@@ -1437,15 +1455,17 @@ final class MeowyController: NSObject {
         }
 
         let halfSize = baseCatSize * catScale / 2
-        let count = dockItemCount()
-        let tileCount = count == 0 ? Int(screen.frame.width / CGFloat(dockTileSize() + 4)) : count
-        let tileSize = dockTileSize()
-        let estimatedDockWidth = CGFloat(tileCount) * CGFloat(tileSize + 4) + 20
-        let center = screen.frame.midX
-        var minX = center - estimatedDockWidth / 2 + halfSize
-        var maxX = center + estimatedDockWidth / 2 - halfSize
-        minX = max(screen.frame.minX + halfSize, minX)
-        maxX = min(screen.frame.maxX - halfSize, maxX)
+        var minX = screen.frame.minX + halfSize
+        var maxX = screen.frame.maxX - halfSize
+        if !dockAutoHide() {
+            let count = dockItemCount()
+            let tileCount = count == 0 ? Int(screen.frame.width / CGFloat(dockTileSize() + 4)) : count
+            let tileSize = dockTileSize()
+            let estimatedDockWidth = CGFloat(tileCount) * CGFloat(tileSize + 4) + 20
+            let center = screen.frame.midX
+            minX = max(screen.frame.minX + halfSize, center - estimatedDockWidth / 2 + halfSize)
+            maxX = min(screen.frame.maxX - halfSize, center + estimatedDockWidth / 2 - halfSize)
+        }
         dockBounds = CGRect(
             x: minX,
             y: screen.visibleFrame.minY + halfSize,
