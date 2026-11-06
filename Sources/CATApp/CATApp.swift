@@ -78,6 +78,8 @@ final class MeowyController: NSObject {
     private var isAgentActive = false
     private var lastClaudeStatus: String?
     private var claudeCompletionUntil: Date?
+    private var lastCodexStatus: String?
+    private var codexCompletionUntil: Date?
     private var completionHideTimer: Timer?
     private(set) var catName: String
     private var isNameHovering = false
@@ -302,6 +304,95 @@ final class MeowyController: NSObject {
         return nil
     }
 
+    private func codexSessionFiles() -> [URL] {
+        let root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex/sessions")
+        guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else { return [] }
+        var result: [URL] = []
+        while let url = enumerator.nextObject() as? URL {
+            if url.pathExtension == "jsonl" { result.append(url) }
+        }
+        return result
+    }
+
+    private func latestCodexSessionFile() -> URL? {
+        let files = codexSessionFiles()
+        var newest: URL?
+        var newestDate: Date = .distantPast
+        for url in files {
+            if let values = try? url.resourceValues(forKeys: [.contentModificationDateKey]),
+               let date = values.contentModificationDate, date > newestDate {
+                newestDate = date
+                newest = url
+            }
+        }
+        return newest
+    }
+
+    private func codexFriendlyToolName(_ name: String) -> String {
+        let lower = name.lowercased()
+        if lower == "exec" || lower.hasPrefix("exec_") || lower.contains("shell") || lower.contains("bash") || lower.contains("zsh") {
+            return "Bash"
+        }
+        if lower == "read" || lower.hasPrefix("read_") || lower.contains("read_file") || lower.contains("read_resource") {
+            return "Read"
+        }
+        if lower == "write" || lower.hasPrefix("write_") || lower.contains("apply_patch") || lower.contains("edit") {
+            return "Edit"
+        }
+
+        // Codex tool names are often snake_case. Keep unknown names readable in the bubble.
+        return name
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
+    }
+
+    private func codexActivity() -> (busy: Bool, activity: String?) {
+        guard let url = latestCodexSessionFile(),
+              let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8) else { return (false, nil) }
+        // Codex stores one JSON object per *actual* newline. Splitting on "\\n"
+        // would leave the entire session as one invalid JSON object, which made every
+        // active Codex process appear as merely "running".
+        let lines = text.split(separator: "\n").suffix(300)
+        var lastStarted = -1
+        var lastComplete = -1
+        var activity: String?
+
+        for (index, line) in lines.enumerated() {
+            guard let obj = try? JSONSerialization.jsonObject(with: Data(String(line).utf8)) as? [String: Any] else { continue }
+            let type = obj["type"] as? String
+            let payload = obj["payload"] as? [String: Any]
+            if type == "event_msg" {
+                switch payload?["type"] as? String {
+                case "task_started":
+                    lastStarted = index
+                    activity = "Thinking"
+                case "task_complete":
+                    lastComplete = index
+                default:
+                    break
+                }
+            } else if type == "response_item" {
+                guard index > lastStarted, lastStarted > lastComplete else { continue }
+                switch payload?["type"] as? String {
+                case "function_call", "custom_tool_call":
+                    if let name = payload?["name"] as? String {
+                        activity = "Using " + codexFriendlyToolName(name)
+                    }
+                case "reasoning":
+                    activity = "Thinking"
+                default:
+                    break
+                }
+            }
+        }
+
+        guard lastStarted > lastComplete else { return (false, nil) }
+        return (true, activity ?? "Thinking")
+    }
+
 
     private func pollAgentStatus() {
         guard isRunning, agentsEnabled else { return }
@@ -330,6 +421,28 @@ final class MeowyController: NSObject {
                 }
             }
             lastClaudeStatus = claudeBusy ? "busy" : "idle"
+        }
+
+        // Codex sessions
+        var codexBusy = false
+        if isExactProcess("codex") {
+            let info = codexActivity()
+            if info.busy {
+                codexBusy = true
+                statuses.append("Codex: " + (info.activity ?? "working"))
+            } else {
+                if lastCodexStatus == "busy" && !(codexCompletionUntil.map { $0 > Date() } ?? false) {
+                    codexCompletionUntil = Date().addingTimeInterval(7)
+                    let url = URL(fileURLWithPath: "/System/Library/Sounds/Blow.aiff")
+                    NSSound(contentsOf: url, byReference: true)?.play()
+                }
+                if codexCompletionUntil.map({ $0 > Date() }) ?? false {
+                    statuses.append("Codex: work complete")
+                }
+            }
+            lastCodexStatus = codexBusy ? "busy" : "idle"
+        } else {
+            lastCodexStatus = nil
         }
 
         // Agent message file
@@ -1347,6 +1460,9 @@ private final class StatusBarController: NSObject {
         let claudeItem = NSMenuItem(title: "Claude", action: nil, keyEquivalent: "")
         claudeItem.state = .on
         agentsSubMenu.addItem(claudeItem)
+        let codexItem = NSMenuItem(title: "Codex", action: nil, keyEquivalent: "")
+        codexItem.state = .on
+        agentsSubMenu.addItem(codexItem)
         agentsItem.submenu = agentsSubMenu
 
         actionItemsSubMenu.addItem(reminderItem)
