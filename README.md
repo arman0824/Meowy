@@ -4,6 +4,8 @@
 
 **Website:** https://meeowy.vercel.app
 
+> **Opening the app:** macOS may say Meowy can't be opened because it is not from an identified developer. Meowy is safe to use; it is only ad-hoc signed, not notarized with a paid Apple Developer ID. To open it, go to **System Settings → Privacy & Security**, scroll down to the security message for Meowy, click **Open Anyway**, then confirm. You only need to do this once; after that, Meowy opens normally.
+
 Meowy is a small menu-bar app that puts a playful pixel-art cat on your Mac desktop.
 
 ### Web page overview
