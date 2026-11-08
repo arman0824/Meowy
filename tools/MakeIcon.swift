@@ -49,30 +49,13 @@ for (name, size) in pairs {
     ctx.addPath(path)
     ctx.clip()
 
-    // Background gradient
-    let gradColors = [cgColor(0.98, 0.84, 0.62), cgColor(0.95, 0.62, 0.45)] as CFArray
-    if let gradient = CGGradient(colorsSpace: cs, colors: gradColors, locations: [0.0, 1.0]) {
-        ctx.drawLinearGradient(gradient, start: CGPoint(x: 0, y: scale), end: CGPoint(x: scale, y: 0), options: [])
-    }
-
-    // Subtle warm highlight
-    ctx.saveGState()
-    let hiColors = [cgColor(1, 1, 1, 0.35), cgColor(1, 1, 1, 0.0)] as CFArray
-    if let hi = CGGradient(colorsSpace: cs, colors: hiColors, locations: [0.0, 1.0]) {
-        ctx.drawRadialGradient(hi, startCenter: CGPoint(x: scale*0.3, y: scale*0.75), startRadius: 0, endCenter: CGPoint(x: scale*0.3, y: scale*0.75), endRadius: scale*0.6, options: [])
-    }
-    ctx.restoreGState()
-
-    // Soft shadow under cat
-    ctx.saveGState()
-    ctx.setFillColor(cgColor(0, 0, 0, 0.18))
-    let shadowOval = CGRect(x: scale*0.30, y: scale*0.18, width: scale*0.40, height: scale*0.06)
-    ctx.fillEllipse(in: shadowOval)
-    ctx.restoreGState()
+    // Plain white background
+    ctx.setFillColor(cgColor(1, 1, 1, 1))
+    ctx.fill(rect)
 
     // Cat sprite scaled up, crisp nearest-neighbor
-    let catScale = scale * 0.58
-    let catRect = CGRect(x: (scale - catScale)/2, y: (scale - catScale)/2 + scale*0.02, width: catScale, height: catScale)
+    let catScale = scale * 0.62
+    let catRect = CGRect(x: (scale - catScale)/2, y: (scale - catScale)/2, width: catScale, height: catScale)
     ctx.interpolationQuality = .none
     ctx.setShouldAntialias(false)
     ctx.draw(catFrame, in: catRect)
