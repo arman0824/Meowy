@@ -2,6 +2,8 @@
 
 ![Build](https://github.com/arman0824/Meowy/actions/workflows/build.yml/badge.svg)
 
+**Website:** https://meeowy.vercel.app
+
 Meowy is a small menu-bar app that puts a playful pixel-art cat on your Mac desktop.
 
 ### Web page overview
