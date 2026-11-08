@@ -54,7 +54,7 @@ jobs:
           set -euo pipefail
           VERSION="${{ steps.version.outputs.version }}"
           ZIP="Meowy-${VERSION}-macos.zip"
-          ditto -c -k --keepParent Meowy.app "$ZIP"
+          ditto --norsrc --noextattr -c -k --keepParent Meowy.app "$ZIP"
           shasum -a 256 "$ZIP" > "${ZIP}.sha256"
           echo "zip=${ZIP}" >> "$GITHUB_OUTPUT"
           ls -lh "$ZIP" "${ZIP}.sha256"
