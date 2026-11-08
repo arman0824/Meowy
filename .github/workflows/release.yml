@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag/version to create, for example v1.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and publish macOS release
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Resolve release version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME}"
+          fi
+          case "$VERSION" in
+            v*) ;;
+            *) VERSION="v${VERSION}" ;;
+          esac
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Releasing ${VERSION}"
+
+      - name: Build app bundle
+        run: ./build.sh
+
+      - name: Verify app bundle
+        run: |
+          set -euo pipefail
+          test -x Meowy.app/Contents/MacOS/CAT
+          plutil -lint Meowy.app/Contents/Info.plist
+          codesign --verify --deep Meowy.app
+
+      - name: Package app
+        id: package
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          ZIP="Meowy-${VERSION}-macos.zip"
+          ditto -c -k --keepParent Meowy.app "$ZIP"
+          shasum -a 256 "$ZIP" > "${ZIP}.sha256"
+          echo "zip=${ZIP}" >> "$GITHUB_OUTPUT"
+          ls -lh "$ZIP" "${ZIP}.sha256"
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Meowy-${{ steps.version.outputs.version }}-macos
+          path: |
+            Meowy-${{ steps.version.outputs.version }}-macos.zip
+            Meowy-${{ steps.version.outputs.version }}-macos.zip.sha256
+          retention-days: 30
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Meowy ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          files: |
+            Meowy-${{ steps.version.outputs.version }}-macos.zip
+            Meowy-${{ steps.version.outputs.version }}-macos.zip.sha256

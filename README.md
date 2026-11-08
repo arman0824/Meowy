@@ -1,5 +1,7 @@
 # Meowy for macOS
 
+![Build](https://github.com/arman0824/Meowy/actions/workflows/build.yml/badge.svg)
+
 Meowy is a small menu-bar app that puts a playful pixel-art cat on your Mac desktop.
 
 ### Web page overview

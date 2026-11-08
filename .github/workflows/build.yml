@@ -1,0 +1,49 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and smoke test
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build app bundle
+        run: ./build.sh
+
+      - name: Verify app bundle
+        run: |
+          set -euo pipefail
+          test -x Meowy.app/Contents/MacOS/CAT
+          plutil -lint Info.plist
+          plutil -lint Meowy.app/Contents/Info.plist
+          codesign --verify --deep Meowy.app
+          test -f Meowy.app/Contents/Resources/Meowy.gif
+          test -f Meowy.app/Contents/Resources/Meowy-jump.gif
+          test -f Meowy.app/Contents/Resources/Meowy.icns
+          test -f Meowy.app/Contents/Resources/Breeze.wav
+          echo "App bundle is valid"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Meowy-macos-${{ github.sha }}
+          path: Meowy.app
+          retention-days: 7
+          if-no-files-found: error
