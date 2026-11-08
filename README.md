@@ -2,8 +2,6 @@
 
 Meowy is a small menu-bar app that puts a playful pixel-art cat on your Mac desktop.
 
-## Screenshots
-
 ### Web page overview
 
 A first look at the Meowy website.
@@ -18,7 +16,7 @@ The key features and controls Meowy offers.
 
 ### In action
 
-Meowy running on macOS.
+Get to know about Meowy.
 
 ![Meowy website screenshot 3](Resources/web3.png)
 ## Requirements
