@@ -81,6 +81,7 @@ final class MeowyController: NSObject {
     private var agentStack: NSStackView?
     private var musicPanel: NSPanel?
     private var musicLabel: NSTextField?
+    private var musicFloatPhase: CGFloat = 0
     private var agentFloatPhase: CGFloat = 0
     private var pomodoroPanel: NSPanel?
     private var pomodoroLabel: NSTextField?
@@ -762,6 +763,9 @@ final class MeowyController: NSObject {
             }
         } else {
             reminderShowingUntil = nil
+            reminderBlinkTimer?.invalidate()
+            reminderBlinkTimer = nil
+            agentStackPanel?.alphaValue = 1.0
         }
 
         if statuses.isEmpty {
@@ -1102,11 +1106,14 @@ final class MeowyController: NSObject {
         let screen = DesktopGeometry.nearestScreen(to: center, screens: screens)
         var x = center.x - size.width / 2
         x = min(max(x, screen.minX + 8), screen.maxX - size.width - 8)
-        var y = center.y + catSize / 2 + 8
+        let floatOffset = sin(musicFloatPhase) * 6
+        var pomodoroOffset: CGFloat = 0
+        if pomodoroPanel?.isVisible == true { pomodoroOffset = (pomodoroPanel?.frame.height ?? 18) + 8 }
+        var y = center.y + catSize / 2 + 8 + floatOffset + pomodoroOffset
         let showingAbove = y + size.height <= screen.maxY - 8
-        if !showingAbove { y = center.y - catSize / 2 - size.height - 8 }
+        if !showingAbove { y = center.y - catSize / 2 - size.height - 8 + floatOffset }
 
-        for other in [agentStackPanel, jokePanel] {
+        for other in [agentStackPanel, jokePanel, pomodoroPanel] {
             guard let panel = other, panel.isVisible else { continue }
             let frame = panel.frame
             if showingAbove {
@@ -1371,7 +1378,9 @@ final class MeowyController: NSObject {
         let timer = Timer(timeInterval: 0.4, repeats: true) { [weak self] _ in
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                if let until = self.reminderShowingUntil, Date() >= until {
+                // Only blink while a reminder is actively showing; stop as soon as it expires
+                // or is cleared (the agent monitor nils reminderShowingUntil after expiry).
+                guard let until = self.reminderShowingUntil, Date() < until else {
                     self.reminderBlinkTimer?.invalidate()
                     self.reminderBlinkTimer = nil
                     self.agentStackPanel?.alphaValue = 1.0
@@ -1416,6 +1425,7 @@ final class MeowyController: NSObject {
         if isJokePaused {
             agentFloatPhase += 0.18
             updateAgentStackPosition()
+            musicFloatPhase += 0.18
             updateMusicPanelPosition()
             if !isJokeBursting {
                 jokeFloatPhase += 0.18
@@ -1445,6 +1455,7 @@ final class MeowyController: NSObject {
         }
         agentFloatPhase += 0.18
         updateAgentStackPosition()
+        musicFloatPhase += 0.18
         updateMusicPanelPosition()
         updateJokeBubblePosition()
         updateNamePanel()
