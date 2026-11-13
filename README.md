@@ -64,7 +64,7 @@ Click the cat icon in the menu bar to choose:
 - **Live on Dock** — wanders along the Dock, pauses to scratch or relax, and takes occasional naps.
 - **Jokes** — toggles the 5-minute joke bubble while docked.
 - **Joke Source** — choose between Dark Jokes, Dad Jokes, Advice, and Quotes.
-- **Agents** — submenu to enable/disable agent monitoring and choose which agents are monitored (Claude, Codex, Cursor).
+- **Agents** — submenu to enable/disable agent monitoring and choose which agents are monitored (Claude, Codex, Cursor, OpenCode).
 - **Music** — submenu to enable/disable the now-playing bubble and choose Apple Music and/or Spotify as sources.
 - **Action Items** — set reminders and pomodoro timers that appear in floating bubbles.
 - **Cat Name** — rename the cat; hovering over the cat shows its name.
@@ -75,12 +75,14 @@ Click the cat icon in the menu bar to choose:
 Meowy remembers its position, size, speed, mode, joke/agent preferences, and selected cat name. Reduced Motion pauses the pet.
 
 ## Agent status
-When **Agents** is enabled, Meowy monitors Claude Code, Codex, and Cursor automatically:
+When **Agents** is enabled, Meowy monitors Claude Code, Codex, Cursor, and OpenCode automatically:
 - Shows “Thinking” while an agent is preparing a response.
 - Shows the current tool activity, such as “Using Bash” or “Using Read”.
 - Shows “work complete” with a notification sound, highlighted in green, then fades after about 7 seconds.
 
 Cursor support covers the Cursor IDE agent (when its transcript is actively changing) and Cursor Agent CLI sessions.
+
+OpenCode support reads OpenCode's local session database (`~/.local/share/opencode/opencode.db`), so it works with both the desktop app and the CLI. It shows reasoning, tool use (Bash, Read, Edit, Search, Web, Skill, and more), and streamed text live.
 
 ## Reminders and pomodoro
 - **Reminder** — schedule a reminder by minutes from now or by a specific time of day.

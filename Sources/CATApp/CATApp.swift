@@ -26,6 +26,7 @@ private let agentsKey = "meowy-cat-agents"
 private let claudeAgentEnabledKey = "meowy-cat-agent-claude"
 private let codexAgentEnabledKey = "meowy-cat-agent-codex"
 private let cursorAgentEnabledKey = "meowy-cat-agent-cursor"
+private let opencodeAgentEnabledKey = "meowy-cat-agent-opencode"
 private let musicKey = "meowy-cat-music"
 private let musicAppleKey = "meowy-cat-music-apple"
 private let musicSpotifyKey = "meowy-cat-music-spotify"
@@ -73,6 +74,7 @@ final class MeowyController: NSObject {
     private(set) var claudeAgentEnabled: Bool
     private(set) var codexAgentEnabled: Bool
     private(set) var cursorAgentEnabled: Bool
+    private(set) var opencodeAgentEnabled: Bool
     private(set) var musicEnabled: Bool
     private(set) var musicAppleEnabled: Bool
     private(set) var musicSpotifyEnabled: Bool
@@ -103,6 +105,8 @@ final class MeowyController: NSObject {
     private var codexCompletionUntil: Date?
     private var lastCursorStatus: String?
     private var cursorCompletionUntil: Date?
+    private var lastOpencodeStatus: String?
+    private var opencodeCompletionUntil: Date?
     private var completionHideTimer: Timer?
     private(set) var catName: String
     private var isNameHovering = false
@@ -143,6 +147,7 @@ final class MeowyController: NSObject {
         self.claudeAgentEnabled = defaults.object(forKey: claudeAgentEnabledKey) as? Bool ?? true
         self.codexAgentEnabled = defaults.object(forKey: codexAgentEnabledKey) as? Bool ?? true
         self.cursorAgentEnabled = defaults.object(forKey: cursorAgentEnabledKey) as? Bool ?? true
+        self.opencodeAgentEnabled = defaults.object(forKey: opencodeAgentEnabledKey) as? Bool ?? true
         if let storedMusic = defaults.object(forKey: musicKey) as? Bool {
             self.musicEnabled = storedMusic
         } else {
@@ -332,6 +337,11 @@ final class MeowyController: NSObject {
     func setCursorAgentEnabled(_ enabled: Bool) {
         cursorAgentEnabled = enabled
         defaults.set(enabled, forKey: cursorAgentEnabledKey)
+    }
+
+    func setOpencodeAgentEnabled(_ enabled: Bool) {
+        opencodeAgentEnabled = enabled
+        defaults.set(enabled, forKey: opencodeAgentEnabledKey)
     }
 
     func setMusicEnabled(_ enabled: Bool) {
@@ -653,6 +663,211 @@ final class MeowyController: NSObject {
         return (true, "Working")
     }
 
+    // MARK: - OpenCode
+
+    /// OpenCode (desktop app and CLI) keeps its state in a local SQLite database.
+    /// The desktop app's main process shows up as `.../MacOS/OpenCode`, while the
+    /// background server is `.../opencode-cli` and the CLI is `.../opencode`.
+    private func isOpencodeProcessRunning() -> Bool {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/ps")
+        task.arguments = ["-A", "-o", "ucomm="]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        do { try task.run() } catch { return false }
+        // Drain the pipe before waiting: `ps` output can exceed the pipe buffer,
+        // which would block the child and deadlock this call on the main thread.
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        guard task.terminationStatus == 0 else { return false }
+        guard let text = String(data: data, encoding: .utf8) else { return false }
+        for line in text.split(separator: "\n") {
+            let comm = line.trimmingCharacters(in: .whitespaces).lowercased()
+            if comm == "opencode" || comm == "opencode-cli" {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func opencodeFriendlyToolName(_ name: String) -> String {
+        let lower = name.lowercased()
+        if lower == "shell" || lower == "bash" || lower == "zsh" || lower == "exec" {
+            return "Bash"
+        }
+        if lower == "read" || lower.contains("read_file") || lower == "list" || lower == "ls" {
+            return "Read"
+        }
+        if lower == "todowrite" || lower == "todoread" {
+            return "Todos"
+        }
+        if lower == "write" || lower == "edit" || lower.contains("patch") {
+            return "Edit"
+        }
+        if lower == "grep" || lower == "glob" || lower == "find" || lower.contains("search") {
+            return "Search"
+        }
+        if lower == "webfetch" || lower == "websearch" || lower == "fetch" {
+            return "Web"
+        }
+        if lower == "skill" { return "Skill" }
+        if lower == "browse" { return "Browser" }
+        if lower == "task" { return "Task" }
+        if lower == "question" { return "Asking" }
+        if lower == "execute" { return "Executing" }
+        // Keep unknown tool names readable in the bubble.
+        return name
+            .replacingOccurrences(of: "_", with: " ")
+            .split(separator: " ")
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+            .joined(separator: " ")
+    }
+
+    private func sqliteJSON(dbPath: String, sql: String) -> Any? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        task.arguments = ["-readonly", "-json", dbPath, sql]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        do { try task.run() } catch { return nil }
+        // Drain before waiting so a large row can't overflow the pipe buffer and hang.
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        guard task.terminationStatus == 0 else { return nil }
+        // `sqlite3 -json` prints nothing when a query matches no rows. That is a valid
+        // empty result (for example "no session is busy"), not a failure.
+        if data.isEmpty { return [[String: Any]]() }
+        return try? JSONSerialization.jsonObject(with: data)
+    }
+
+    /// Returns `nil` when the state can't be determined (missing database, failed
+    /// query, unreadable row), so a transient error never looks like "work complete".
+    private func opencodeActivity() -> (busy: Bool, activity: String?)? {
+        let dataRoot = ProcessInfo.processInfo.environment["XDG_DATA_HOME"]
+            .map { URL(fileURLWithPath: $0) }
+            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/share")
+        let dbURL = dataRoot.appendingPathComponent("opencode/opencode.db")
+        guard FileManager.default.fileExists(atPath: dbURL.path) else { return nil }
+
+        // OpenCode stamps each turn with `time_busy` and `time_idle` on the session.
+        // Comparing those is reliable, unlike watching individual streamed messages:
+        // each step of a turn is briefly "completed" before the next one starts, which
+        // made Meowy flash "work complete" in the middle of a turn.
+        let sql = """
+        SELECT s.id AS session, s.time_updated AS session_updated,
+               m.data AS data, m.type AS type, m.time_updated AS updated
+        FROM (SELECT id, time_updated FROM session_v2
+              WHERE time_busy > COALESCE(time_idle, 0)
+              ORDER BY time_updated DESC LIMIT 1) s
+        LEFT JOIN session_message m ON m.session_id = s.id
+        ORDER BY m.time_updated DESC
+        LIMIT 1;
+        """
+        guard let rows = sqliteJSON(dbPath: dbURL.path, sql: sql) as? [[String: Any]] else {
+            // Older databases without turn markers still have message history.
+            return opencodeActivityFromMessages(dbPath: dbURL.path)
+        }
+        // No session is busy.
+        guard let row = rows.first else {
+            // A database whose sessions were never migrated into `session_v2` still
+            // has message history; fall back rather than reporting a permanent idle.
+            let countSQL = "SELECT COUNT(*) AS n FROM session_v2;"
+            if let countRows = sqliteJSON(dbPath: dbURL.path, sql: countSQL) as? [[String: Any]],
+               ((countRows.first?["n"] as? NSNumber)?.intValue ?? 0) == 0 {
+                return opencodeActivityFromMessages(dbPath: dbURL.path)
+            }
+            return (false, nil)
+        }
+
+        let messageUpdated = (row["updated"] as? NSNumber)?.doubleValue
+        let sessionUpdated = (row["session_updated"] as? NSNumber)?.doubleValue
+        let updatedMs = messageUpdated ?? sessionUpdated ?? 0
+        // Guard against a turn abandoned by a crash or a quit.
+        if Date().timeIntervalSince1970 * 1000 - updatedMs > 600_000 { return (false, nil) }
+
+        guard let messageString = row["data"] as? String,
+              let message = try? JSONSerialization.jsonObject(with: Data(messageString.utf8)) as? [String: Any] else {
+            return (true, "Thinking")
+        }
+        if row["type"] as? String == "user" { return (true, "Thinking") }
+
+        // Still working: the last content part is the current activity. A part that
+        // just finished is still the most useful label until the next one appears.
+        let content = message["content"] as? [[String: Any]] ?? []
+        guard let last = content.last else { return (true, "Thinking") }
+        switch last["type"] as? String {
+        case "reasoning":
+            return (true, "Thinking")
+        case "tool":
+            let name = last["name"] as? String ?? "tool"
+            return (true, "Using " + opencodeFriendlyToolName(name))
+        case "text":
+            if let text = last["text"] as? String {
+                let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "\n", with: " ")
+                if !cleaned.isEmpty { return (true, String(cleaned.prefix(90))) }
+            }
+            return (true, "Working")
+        default:
+            return (true, "Working")
+        }
+    }
+
+    /// Fallback for OpenCode databases that predate the per-session turn markers.
+    private func opencodeActivityFromMessages(dbPath: String) -> (busy: Bool, activity: String?)? {
+        // The most recently updated conversational message, without reading every row's
+        // large JSON blob. Bookkeeping rows (idle, compaction, synthetic…) say nothing
+        // about activity.
+        let sql = """
+        SELECT data, type, time_updated AS updated FROM session_message
+        WHERE type IN ('user', 'assistant')
+        ORDER BY time_updated DESC
+        LIMIT 1;
+        """
+        guard let rows = sqliteJSON(dbPath: dbPath, sql: sql) as? [[String: Any]],
+              let row = rows.first,
+              let messageString = row["data"] as? String,
+              let message = try? JSONSerialization.jsonObject(with: Data(messageString.utf8)) as? [String: Any] else {
+            return nil
+        }
+
+        let updatedMs = (row["updated"] as? NSNumber)?.doubleValue ?? 0
+        let ageMs = Date().timeIntervalSince1970 * 1000 - updatedMs
+        let type = row["type"] as? String
+        if type == "user" {
+            // A prompt was submitted and the assistant has not answered yet.
+            // Ignore stale prompts from old sessions so an idle app isn't "Thinking" forever.
+            return ageMs < 60_000 ? (true, "Thinking") : (false, nil)
+        }
+        guard type == "assistant" else { return nil }
+
+        let time = message["time"] as? [String: Any]
+        if time?["completed"] != nil { return (false, nil) } // Finished.
+        // Guard against a message left incomplete by a crash or a closed session.
+        if ageMs > 600_000 { return (false, nil) }
+
+        // Still streaming: the last content part is the current activity.
+        let content = message["content"] as? [[String: Any]] ?? []
+        guard let last = content.last else { return (true, "Thinking") }
+        switch last["type"] as? String {
+        case "reasoning":
+            return (true, "Thinking")
+        case "tool":
+            let name = last["name"] as? String ?? "tool"
+            return (true, "Using " + opencodeFriendlyToolName(name))
+        case "text":
+            if let text = last["text"] as? String {
+                let cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "\n", with: " ")
+                if !cleaned.isEmpty { return (true, String(cleaned.prefix(90))) }
+            }
+            return (true, "Working")
+        default:
+            return (true, "Working")
+        }
+    }
 
     private func pollAgentStatus() {
         guard isRunning, agentsEnabled || musicEnabled else { return }
@@ -734,6 +949,30 @@ final class MeowyController: NSObject {
             } else {
                 lastCursorStatus = nil
             }
+        }
+
+        // OpenCode desktop app, server, and CLI
+        if opencodeAgentEnabled, isOpencodeProcessRunning() {
+            // A `nil` result means the database state is momentarily unknown; leave the
+            // previous status alone rather than announcing a false completion.
+            if let info = opencodeActivity() {
+                if info.busy {
+                    statuses.append("OpenCode: " + (info.activity ?? "working"))
+                    lastOpencodeStatus = "busy"
+                } else {
+                    if lastOpencodeStatus == "busy" && !(opencodeCompletionUntil.map { $0 > Date() } ?? false) {
+                        opencodeCompletionUntil = Date().addingTimeInterval(7)
+                        let url = URL(fileURLWithPath: "/System/Library/Sounds/Blow.aiff")
+                        NSSound(contentsOf: url, byReference: true)?.play()
+                    }
+                    if opencodeCompletionUntil.map({ $0 > Date() }) ?? false {
+                        statuses.append("OpenCode: work complete")
+                    }
+                    lastOpencodeStatus = "idle"
+                }
+            }
+        } else {
+            lastOpencodeStatus = nil
         }
         // Agent message file
         if let fileText = agentMessageFile() { statuses.append(fileText) }
@@ -1471,6 +1710,8 @@ final class MeowyController: NSObject {
         if let until = pomodoroCompletedUntil, until > Date() { return true }
         if let until = claudeCompletionUntil, until > Date() { return true }
         if let until = codexCompletionUntil, until > Date() { return true }
+        if let until = cursorCompletionUntil, until > Date() { return true }
+        if let until = opencodeCompletionUntil, until > Date() { return true }
         return false
     }
 
@@ -1958,6 +2199,7 @@ private final class StatusBarController: NSObject {
     private let claudeAgentItem = NSMenuItem(title: "Claude", action: #selector(toggleClaudeAgent), keyEquivalent: "")
     private let codexAgentItem = NSMenuItem(title: "Codex", action: #selector(toggleCodexAgent), keyEquivalent: "")
     private let cursorAgentItem = NSMenuItem(title: "Cursor", action: #selector(toggleCursorAgent), keyEquivalent: "")
+    private let opencodeAgentItem = NSMenuItem(title: "OpenCode", action: #selector(toggleOpencodeAgent), keyEquivalent: "")
     private let musicItem = NSMenuItem(title: "Music", action: nil, keyEquivalent: "")
     private let musicSubMenu = NSMenu(title: "Music")
     private var musicEnabledSubItem = NSMenuItem(title: "Enabled", action: #selector(toggleMusic), keyEquivalent: "")
@@ -1993,6 +2235,7 @@ private final class StatusBarController: NSObject {
         claudeAgentItem.target = self
         codexAgentItem.target = self
         cursorAgentItem.target = self
+        opencodeAgentItem.target = self
         musicEnabledSubItem.target = self
         musicAppleItem.target = self
         musicSpotifyItem.target = self
@@ -2017,6 +2260,7 @@ private final class StatusBarController: NSObject {
         agentsSubMenu.addItem(claudeAgentItem)
         agentsSubMenu.addItem(codexAgentItem)
         agentsSubMenu.addItem(cursorAgentItem)
+        agentsSubMenu.addItem(opencodeAgentItem)
         agentsItem.submenu = agentsSubMenu
 
         actionItemsSubMenu.addItem(reminderItem)
@@ -2063,6 +2307,7 @@ private final class StatusBarController: NSObject {
         claudeAgentItem.state = meowy.claudeAgentEnabled ? .on : .off
         codexAgentItem.state = meowy.codexAgentEnabled ? .on : .off
         cursorAgentItem.state = meowy.cursorAgentEnabled ? .on : .off
+        opencodeAgentItem.state = meowy.opencodeAgentEnabled ? .on : .off
         musicEnabledSubItem.state = meowy.musicEnabled ? .on : .off
         musicAppleItem.state = meowy.musicAppleEnabled ? .on : .off
         musicSpotifyItem.state = meowy.musicSpotifyEnabled ? .on : .off
@@ -2128,6 +2373,11 @@ private final class StatusBarController: NSObject {
 
     @objc private func toggleCursorAgent() {
         meowy.setCursorAgentEnabled(!meowy.cursorAgentEnabled)
+        updateMenuState()
+    }
+
+    @objc private func toggleOpencodeAgent() {
+        meowy.setOpencodeAgentEnabled(!meowy.opencodeAgentEnabled)
         updateMenuState()
     }
 
